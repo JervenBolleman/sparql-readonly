@@ -2,7 +2,6 @@ package sib.swiss.swissprot.sparql.ro;
 
 import java.io.File;
 
-import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
 import org.eclipse.rdf4j.sail.config.SailFactory;
 import org.eclipse.rdf4j.sail.config.SailImplConfig;
@@ -25,12 +24,12 @@ public class RoStoreFactory implements SailFactory {
 	}
 
 	@Override
-	public SailImplConfig getConfig() {
+	public RoConfig getConfig() {
 		return new RoConfig();
 	}
 
 	@Override
-	public Sail getSail(SailImplConfig config) throws SailConfigException {
+	public RoStore getSail(SailImplConfig config) throws SailConfigException {
 		if (!SAIL_TYPE.equals(config.getType())) {
 			throw new SailConfigException("Invalid Sail type: "
 					+ config.getType());

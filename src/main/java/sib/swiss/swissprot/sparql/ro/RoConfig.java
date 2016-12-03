@@ -41,9 +41,8 @@ public class RoConfig extends AbstractSailImplConfig {
 
 	}
 
-	private void setFile(String stringValue) {
+	void setFile(String stringValue) {
 		this.file = stringValue;
-
 	}
 
 	@Override

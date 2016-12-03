@@ -1,43 +1,31 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.io.File;
-import java.io.IOException;
+import static org.junit.Assert.assertNotNull;
 
-import junit.framework.TestCase;
+import java.nio.file.Path;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-public class RoStoreTest extends TestCase {
+public class RoStoreTest {
 	@Rule
 	public TemporaryFolder folder = new TemporaryFolder();
-	protected File newFile = null;
-	protected File dataDir = null;
+	private Path dir;
 
-	@Override
 	@Before
-	public void setUp() {
-		try {
-			dataDir = folder.newFolder("data.dir");
-
-		} catch (IOException e) {
-			fail();
-		}
+	public void init() throws Exception {
+		dir = folder.newFolder().toPath();
 	}
 
 	@Test
-	public void basicStartTest() {
-		RoStore store = new RoStore();
+	public void basicConfigLoad() {
+
+		RoStoreFactory fact = new RoStoreFactory();
+		final RoConfig config = fact.getConfig();
+		config.setFile(dir.toString());
+		RoStore store = fact.getSail(config);
+		assertNotNull(store);
 	}
-
-	@Override
-	@After
-	public void tearDown() {
-
-		dataDir.delete();
-	}
-
 }
