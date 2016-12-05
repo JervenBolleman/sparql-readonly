@@ -1,6 +1,7 @@
 package sib.swiss.swissprot.sparql.ro.values;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import org.eclipse.rdf4j.model.IRI;
 
@@ -32,7 +33,12 @@ public class RoIri implements IRI {
 	@Override
 	public String getLocalName() {
 		try {
-			return dict.getLocalNameFromId(id);
+			final Optional<String> localNameFromId = dict
+					.getLocalNameFromId(id);
+			if (localNameFromId.isPresent())
+				return localNameFromId.get();
+			else
+				throw new RuntimeException("No local name for " + id);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
