@@ -12,11 +12,11 @@ import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
 
-public class TempLitalDictionary extends TempDictionary {
+public class TempLiteralDictionary extends TempDictionary {
 	private final Map<IRI, FileOutputStream> datatypes = new HashMap<>();
 	private final Map<String, FileOutputStream> languages = new HashMap<>();
 
-	public TempLitalDictionary(File out) {
+	public TempLiteralDictionary(File out) {
 		super(out);
 	}
 

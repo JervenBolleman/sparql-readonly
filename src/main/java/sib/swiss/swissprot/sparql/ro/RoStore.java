@@ -23,7 +23,7 @@ import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
-import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLitalDictionary;
+import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
 
 public class RoStore extends AbstractSail {
 	private RoValueFactory vf;
@@ -93,7 +93,7 @@ public class RoStore extends AbstractSail {
 
 		final TempBNodeDictionary tempBNodeDictionary = new TempBNodeDictionary(
 				subDataDirs.get(RoDirectories.BNODE_DICTIONARIES));
-		final TempLitalDictionary tempLitalDictionary = new TempLitalDictionary(
+		final TempLiteralDictionary tempLitalDictionary = new TempLiteralDictionary(
 				subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES));
 		final TempIriDictionary tempIriDictionary = new TempIriDictionary(
 				subDataDirs.get(RoDirectories.IRI_DICTIONARIES));
