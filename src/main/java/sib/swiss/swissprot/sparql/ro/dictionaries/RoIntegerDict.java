@@ -6,7 +6,6 @@ import java.nio.ByteBuffer;
 
 import org.eclipse.rdf4j.model.Literal;
 
-import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 
@@ -19,8 +18,7 @@ public class RoIntegerDict extends RoDictionary {
 	public Literal getFromId(long id) throws IOException {
 		if ((SECOND_BYTE_TRUE & id) == SECOND_BYTE_TRUE) {
 			long offset = lookupOffset(id);
-			byte[] rawvalue = ByteBuffersBackedByFilesTools.readByteArrayAt(
-					offset, backingFile);
+			byte[] rawvalue = readBytesAt(offset);
 			return new RoBigIntegerLiteral(new BigInteger(rawvalue));
 		} else
 			return new RoIntegerLiteral(id);

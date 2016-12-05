@@ -38,4 +38,7 @@ public class RoIri implements IRI {
 		}
 	}
 
+	public long getId() {
+		return id;
+	}
 }

@@ -15,5 +15,4 @@ public class RoIriDictionary {
 		super();
 		this.namepacemap = namepacemap;
 	}
-
 }

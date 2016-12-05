@@ -13,7 +13,7 @@ public class RoStoreFactory implements SailFactory {
 	 * 
 	 * @see SailFactory#getSailType()
 	 */
-	public static final String SAIL_TYPE = "isbsib:BEDFileStore";
+	public static final String SAIL_TYPE = "isbsib:sparql.ro";
 
 	/**
 	 * Returns the Sail's type: <tt>openrdf:MemoryStore</tt>.

@@ -2,20 +2,30 @@ package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-
-import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 
 public class RoIriNamespaceDictionary extends RoDictionary {
 
-	public RoIriNamespaceDictionary(long[] offSetMap, ByteBuffer[] backingFile) {
+	private final String namespace;
+	private final int namespaceId;
+
+	public RoIriNamespaceDictionary(long[] offSetMap, ByteBuffer[] backingFile,
+			String namespace, int namespaceId) {
 		super(offSetMap, backingFile);
+		this.namespace = namespace;
+		this.namespaceId = namespaceId;
 	}
 
 	public String getLocalNameFromId(long id) throws IOException {
 		int withoutMask = (int) id;
-		long offset = offSetMap[withoutMask];
-		return new String(ByteBuffersBackedByFilesTools.readByteArrayAt(offset,
-				backingFile), StandardCharsets.UTF_8);
+		long offset = getOffset(withoutMask);
+		return readStringAt(offset);
+	}
+
+	public String getNamespace() {
+		return namespace;
+	}
+
+	public int getNamespaceId() {
+		return namespaceId;
 	}
 }
