@@ -2,7 +2,7 @@ package sib.swiss.swissprot.sparql.ro.values;
 
 import org.eclipse.rdf4j.model.BNode;
 
-public class RoBnode implements BNode {
+public class RoBnode implements BNode, RoResource {
 	private static final long serialVersionUID = 1L;
 
 	private final long id;
@@ -14,7 +14,7 @@ public class RoBnode implements BNode {
 
 	@Override
 	public String stringValue() {
-		return "#_" + getID();
+		return "#_" + getLongId();
 	}
 
 	@Override
@@ -22,4 +22,12 @@ public class RoBnode implements BNode {
 		return String.valueOf(id);
 	}
 
+	@Override
+	public long getLongId() {
+		return id;
+	}
+
+	public static RoBnode fromLongId(long id) {
+		return new RoBnode(id);
+	}
 }

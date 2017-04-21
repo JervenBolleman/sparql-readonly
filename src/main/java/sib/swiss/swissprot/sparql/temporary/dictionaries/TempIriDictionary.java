@@ -2,13 +2,10 @@ package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
 import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.text.Collator;
@@ -22,12 +19,10 @@ import java.util.stream.Collectors;
 import org.eclipse.rdf4j.model.IRI;
 import org.roaringbitmap.RoaringBitmap;
 
-import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
-import sib.swiss.swissprot.sparql.ro.dictionaries.BasicRoIriNamespaceDictionary;
+import sib.swiss.swissprot.sparql.ro.RoNamespace;
+import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriNamespaceDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriPrefixFollowedByNumber;
 
 public class TempIriDictionary extends TempDictionary {
 
@@ -74,7 +69,8 @@ public class TempIriDictionary extends TempDictionary {
 		}
 	}
 
-	private final Map<String, FileOutputStream> namespaces = new HashMap<>();
+	private final Map<String, FileOutputStream> namespaces_fos = new HashMap<>();
+	private final Map<String, String> namespaces_prefix = new HashMap<>();
 
 	public TempIriDictionary(File out) {
 		super(out);
@@ -82,37 +78,42 @@ public class TempIriDictionary extends TempDictionary {
 
 	public void add(IRI subject) throws IOException {
 		final String namespace = subject.getNamespace();
-		FileOutputStream fos = namespaces.get(namespace);
+		FileOutputStream fos = namespaces_fos.get(namespace);
 		if (fos == null) {
 			fos = new FileOutputStream(new File(out, "temp-"
 					+ FileNameEncoderFunctions.encodeNamespace(namespace)));
-			namespaces.put(namespace, fos);
+			namespaces_fos.put(namespace, fos);
 		}
-		fos.write(StandardCharsets.UTF_8.encode(subject.getLocalName()).array());
+		fos.write(
+				StandardCharsets.UTF_8.encode(subject.getLocalName()).array());
 		fos.write('\n');
 	}
 
 	@Override
 	public void close() throws IOException {
-		for (FileOutputStream fos : namespaces.values())
+		for (FileOutputStream fos : namespaces_fos.values())
 			fos.close();
 	}
 
 	public RoIriDictionary load() throws IOException {
-		final List<NamespaceFilePair> bigestNamespaceFirst = namespaces
-				.keySet()
-				.stream()
-				.map(s -> new NamespaceFilePair(s))
-				.sorted((f1, f2) -> Long.compare(f1.file.length(),
-						f2.file.length())).collect(Collectors.toList());
-		Map<Integer, RoIriNamespaceDictionary> map = new HashMap<>();
-		int key = 1;
+		final List<NamespaceFilePair> bigestNamespaceFirst = namespaces_fos
+				.keySet().stream()
+				.map(s -> new NamespaceFilePair(s)).sorted((f1, f2) -> Long
+						.compare(f1.file.length(), f2.file.length()))
+				.collect(Collectors.toList());
+
+		RoNamespaces namespaces = new RoNamespaces();
+		RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
+		int key = 0;
 		for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
 
+			RoNamespace roNamespace = namespaces.putOrGet(key++,
+					namespaceTempFile.namespace);
 			File tempFile = namespaceTempFile.file;
 			String namespace = namespaceTempFile.namespace;
-			File lengthString = new File(out, key + "-iris");
-			File offsetsFile = new File(key + "-offsets");
+			File lengthString = new File(out, roNamespace.getId() + "-iris");
+			File offsetsFile = new File(roNamespace.getId() + "-offsets");
+
 			DataDistribution data = new DataDistribution();
 			{
 				final List<String> tempNodes = readTempFileIntoMemory(tempFile,
@@ -121,41 +122,17 @@ public class TempIriDictionary extends TempDictionary {
 						data);
 			}
 			if (data.allNumericWithPrefix()) {
-				map.put(key, new RoIriPrefixFollowedByNumber(offsetsFile,
-						lengthString, namespace, key));
+
+				iriDictionary.addPredixFollowedByBNumberDictionary(offsetsFile,
+						lengthString, roNamespace);
 			} else {
-				long[] offsetMap = readOffsetMapIntoMemory(offsetsFile);
-				map.put(key,
-						new BasicRoIriNamespaceDictionary(offsetMap,
-								ByteBuffersBackedByFilesTools
-										.openByteBuffer(lengthString.toPath()),
-								namespace, key));
-			}
-			key = key + 1;
-		}
-		return new RoIriDictionary(map);
-	}
 
-	private long[] readOffsetMapIntoMemory(File offsetsFile)
-			throws FileNotFoundException, IOException {
-		long[] map = new long[(int) (offsetsFile.length() / Long.BYTES)];
-		int key = 0;
-		try (InputStream reader = new FileInputStream(offsetsFile)) {
-			byte[] singleOffset = new byte[Long.BYTES];
-			LongBuffer singleOffsetAsLong = ByteBuffer.wrap(singleOffset)
-					.asLongBuffer();
-			for (int i = 0; i < Long.BYTES; i++) {
-				final int read = reader.read();
-				if (read == -1) {
-					return map;
-				}
-				singleOffset[i] = (byte) read;
-
+				iriDictionary.addBasicRoIriNamespaceDictionary(offsetsFile,
+						lengthString, roNamespace);
 			}
-			map[key] = singleOffsetAsLong.get(0);
-			key++;
+
 		}
-		return map;
+		return iriDictionary;
 	}
 
 	private List<String> readTempFileIntoMemory(File tempFile,
@@ -179,11 +156,12 @@ public class TempIriDictionary extends TempDictionary {
 	}
 
 	private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes,
-			File lengthString, File offsetsFile) throws IOException,
-			FileNotFoundException {
+			File lengthString, File offsetsFile)
+			throws IOException, FileNotFoundException {
 		long pos = 0;
 		try (FileOutputStream dataOs = new FileOutputStream(lengthString);
-				FileOutputStream offsetsOs = new FileOutputStream(offsetsFile)) {
+				FileOutputStream offsetsOs = new FileOutputStream(
+						offsetsFile)) {
 			for (int i = 0; i < tempNodes.size(); i++) {
 				String node = tempNodes.get(i);
 				final byte[] data = stringAsUtf8ByteArray(node);
@@ -208,8 +186,8 @@ public class TempIriDictionary extends TempDictionary {
 		for (int i = 0; i < tempNodes.size(); i++) {
 			map.add(Integer.parseInt(tempNodes.get(i).substring(start)));
 		}
-		try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(
-				lengthString))) {
+		try (DataOutputStream dos = new DataOutputStream(
+				new FileOutputStream(lengthString))) {
 			map.serialize(dos);
 		}
 		List<String> info = Arrays.asList(new String[] {
@@ -221,6 +199,7 @@ public class TempIriDictionary extends TempDictionary {
 
 	private final class NamespaceFilePair {
 		private final String namespace;
+
 		private final File file;
 
 		public NamespaceFilePair(String s) {

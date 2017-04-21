@@ -6,10 +6,12 @@ public class RoNamespace implements Namespace {
 	private static final long serialVersionUID = 1L;
 	private final String prefix;
 	private final String name;
+	private final int id;
 
-	public RoNamespace(String prefix, String namespace) {
+	public RoNamespace(String prefix, String namespace, int id) {
 		this.prefix = prefix;
 		this.name = namespace;
+		this.id = id;
 	}
 
 	@Override
@@ -30,10 +32,8 @@ public class RoNamespace implements Namespace {
 		return prefix;
 	}
 
-	static RoNamespace fromSavedString(String s) {
-		int firstColon = s.indexOf(':');
-		String prefix = s.substring(0, firstColon);
-		String namespace = s.substring(firstColon + 1);
-		return new RoNamespace(prefix, namespace);
+	public int getId() {
+		return id;
 	}
+
 }

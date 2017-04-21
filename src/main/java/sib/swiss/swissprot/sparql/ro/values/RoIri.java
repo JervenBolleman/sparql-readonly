@@ -5,18 +5,17 @@ import java.util.Optional;
 
 import org.eclipse.rdf4j.model.IRI;
 
-import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
-public class RoIri implements IRI {
+public class RoIri implements IRI, RoResource {
 	private static final long serialVersionUID = 1L;
-	private static RoIriDictionary dict;
-	private static RoNamespaces namespaces;
+	private final RoIriDictionary dict;
 	private final long id;
 
-	public RoIri(long id) {
+	public RoIri(long id, RoIriDictionary dict) {
 		super();
 		this.id = id;
+		this.dict = dict;
 	}
 
 	@Override
@@ -27,7 +26,7 @@ public class RoIri implements IRI {
 	@Override
 	public String getNamespace() {
 
-		return namespaces.getFromId(id).getName();
+		return dict.getNamespaces().getFromId(id).getName();
 	}
 
 	@Override
@@ -44,7 +43,8 @@ public class RoIri implements IRI {
 		}
 	}
 
-	public long getId() {
+	@Override
+	public long getLongId() {
 		return id;
 	}
 }

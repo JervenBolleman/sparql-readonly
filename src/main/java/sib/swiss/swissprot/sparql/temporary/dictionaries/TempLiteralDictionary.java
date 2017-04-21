@@ -11,6 +11,7 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 
 public class TempLiteralDictionary extends TempDictionary {
 	private final Map<IRI, FileOutputStream> datatypes = new HashMap<>();
@@ -54,5 +55,10 @@ public class TempLiteralDictionary extends TempDictionary {
 			fos.close();
 		for (FileOutputStream fos : languages.values())
 			fos.close();
+	}
+
+	public RoLiteralDict load() {
+
+		return null;
 	}
 }

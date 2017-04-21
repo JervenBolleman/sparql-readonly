@@ -14,6 +14,7 @@ import org.eclipse.rdf4j.model.BNode;
 
 import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
+import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
 import com.google.common.io.Files;
 
@@ -31,7 +32,7 @@ public class TempBNodeDictionary extends TempDictionary {
 		try {
 			long pid = Long.parseLong(subject.getID());
 			if ((SECOND_BYTE_TRUE & pid) == SECOND_BYTE_TRUE) {
-				add(subject.getID());
+				add(new RoBnode(pid));
 			}
 		} catch (NumberFormatException e) {
 			add(subject.getID());

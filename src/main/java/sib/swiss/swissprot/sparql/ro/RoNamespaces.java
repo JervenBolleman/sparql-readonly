@@ -1,20 +1,18 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.stream.Stream;
-
-import org.eclipse.rdf4j.sail.SailException;
 
 public class RoNamespaces implements Map<String, RoNamespace> {
+
+	private Map<String, RoNamespace> namespaces;
+	private RoNamespace[] namespaceArray;
 
 	@Override
 	public int size() {
@@ -92,7 +90,8 @@ public class RoNamespaces implements Map<String, RoNamespace> {
 	}
 
 	@Override
-	public void forEach(BiConsumer<? super String, ? super RoNamespace> action) {
+	public void forEach(
+			BiConsumer<? super String, ? super RoNamespace> action) {
 		namespaces.forEach(action);
 	}
 
@@ -130,37 +129,26 @@ public class RoNamespaces implements Map<String, RoNamespace> {
 	}
 
 	@Override
-	public RoNamespace computeIfPresent(
-			String key,
+	public RoNamespace computeIfPresent(String key,
 			BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
 		return namespaces.computeIfPresent(key, remappingFunction);
 	}
 
 	@Override
-	public RoNamespace compute(
-			String key,
+	public RoNamespace compute(String key,
 			BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
 		return namespaces.compute(key, remappingFunction);
 	}
 
 	@Override
-	public RoNamespace merge(
-			String key,
-			RoNamespace value,
+	public RoNamespace merge(String key, RoNamespace value,
 			BiFunction<? super RoNamespace, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
 		return namespaces.merge(key, value, remappingFunction);
 	}
 
-	private Map<String, RoNamespace> namespaces;
-
-	RoNamespaces(Path path) {
-		try (Stream<String> lines = Files.lines(path)) {
-			namespaces = new HashMap<>();
-			lines.map(RoNamespace::fromSavedString).forEach(
-					n -> namespaces.put(n.getPrefix(), n));
-		} catch (IOException e) {
-			throw new SailException(e);
-		}
+	public RoNamespaces() {
+		namespaceArray = new RoNamespace[0];
+		namespaces = new LinkedHashMap<>();
 	}
 
 	public Collection<RoNamespace> getNamespaces() {
@@ -170,6 +158,44 @@ public class RoNamespaces implements Map<String, RoNamespace> {
 
 	public RoNamespace getFromId(long id) {
 
+		int intId = (int) (id >> 32);
+		return namespaceArray[intId];
+	}
+
+	static RoNamespace fromSavedString(String s, int i) {
+		int firstColon = s.indexOf(':');
+		String prefix = s.substring(0, firstColon);
+		String namespace = s.substring(firstColon + 1);
+		return new RoNamespace(prefix, namespace, i);
+	}
+
+	public void add(String prefix, String uri) {
+		if (!namespaces.containsValue(uri)) {
+			namespaceArray = Arrays.copyOf(namespaceArray,
+					namespaceArray.length + 1);
+			RoNamespace roNamespace = new RoNamespace(prefix, uri,
+					namespaceArray.length - 1);
+			namespaceArray[namespaceArray.length - 1] = roNamespace;
+			namespaces.put(prefix, roNamespace);
+		}
+	}
+
+	public static RoNamespaces getInstance() {
 		return null;
+	}
+
+	public RoNamespace putOrGet(int i, String namespace) {
+		if (namespaceArray.length < i)
+			return namespaceArray[i];
+		else if (i >= namespaceArray.length) {
+			namespaceArray = Arrays.copyOf(namespaceArray, i + 1);
+			RoNamespace toAdd = new RoNamespace(null, namespace, i);
+			namespaceArray[i] = toAdd;
+			return toAdd;
+
+		} else
+			return getNamespaces().stream()
+					.filter(n -> n.getName().equals(namespace)).findAny().get();
+
 	}
 }

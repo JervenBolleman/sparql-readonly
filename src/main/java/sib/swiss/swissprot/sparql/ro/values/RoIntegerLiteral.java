@@ -4,7 +4,7 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
 
-public class RoIntegerLiteral extends SimpleLiteral {
+public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
 	private static final long serialVersionUID = 1L;
 	private final long value;
 
@@ -20,5 +20,10 @@ public class RoIntegerLiteral extends SimpleLiteral {
 	@Override
 	public IRI getDatatype() {
 		return XMLSchema.INTEGER;
+	}
+
+	@Override
+	public long getLongId() {
+		return value;
 	}
 }

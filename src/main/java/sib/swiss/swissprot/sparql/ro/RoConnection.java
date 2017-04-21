@@ -26,14 +26,12 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.IterativeEvaluationOptimi
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.OrderLimitOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryModelNormalizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.SameTermFilterOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.SimpleEvaluationStrategy;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.UnknownSailTransactionStateException;
 import org.eclipse.rdf4j.sail.UpdateContext;
-//import org.eclipse.rdf4j..sail.UnknownSailTransactionStateException;
-//import org.eclipse.rdf4j..sail.UpdateContext;
 
 public class RoConnection implements SailConnection {
 	private final RoStore store;
@@ -61,7 +59,7 @@ public class RoConnection implements SailConnection {
 			boolean includeInferred) throws SailException {
 		try {
 
-			EvaluationStrategy strategy = new SimpleEvaluationStrategy(
+			EvaluationStrategy strategy = new StrictEvaluationStrategy(
 					tripleSource, store.getFederatedServiceResolver());
 			tupleExpr = tupleExpr.clone();
 			new BindingAssigner().optimize(tupleExpr, dataset, bindings);

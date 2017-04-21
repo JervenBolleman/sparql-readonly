@@ -15,15 +15,16 @@ import sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
 
-public class LoaderHandler implements RDFHandler {
+public class DictionaryBuildingHandler implements RDFHandler {
 
 	private final RoStore roStore;
 	private final TempIriDictionary iris;
 	private final TempLiteralDictionary literals;
 	private final TempBNodeDictionary bnodes;
 
-	public LoaderHandler(RoStore roStore, TempBNodeDictionary bnodes,
-			TempIriDictionary iris, TempLiteralDictionary dict) {
+	public DictionaryBuildingHandler(RoStore roStore,
+			TempBNodeDictionary bnodes, TempIriDictionary iris,
+			TempLiteralDictionary dict) {
 		this.roStore = roStore;
 		this.bnodes = bnodes;
 		this.iris = iris;
@@ -45,13 +46,12 @@ public class LoaderHandler implements RDFHandler {
 	@Override
 	public void handleNamespace(String prefix, String uri)
 			throws RDFHandlerException {
-		RoNamespace ns = new RoNamespace(prefix, uri);
-		roStore.getNamespaces().put(prefix, ns);
+
+		roStore.getNamespaces().add(prefix, uri);
 	}
 
 	@Override
 	public void handleStatement(Statement st) throws RDFHandlerException {
-		roStore.getPredicateStore(st.getPredicate());
 		try {
 			addResource(st.getSubject());
 			addIri(st.getPredicate());

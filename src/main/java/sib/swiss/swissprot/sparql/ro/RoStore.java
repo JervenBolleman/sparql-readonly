@@ -1,6 +1,7 @@
 package sib.swiss.swissprot.sparql.ro;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.EnumMap;
@@ -21,6 +22,8 @@ import org.eclipse.rdf4j.sail.helpers.AbstractSail;
 
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
+import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
@@ -34,6 +37,7 @@ public class RoStore extends AbstractSail {
 			RoDirectories.class);
 	private RoIriDictionary iriDict;
 	private RoBnodeDictionary bnodeDict;
+	private RoLiteralDict literalDict;
 
 	@Override
 	public boolean isWritable() throws SailException {
@@ -75,9 +79,19 @@ public class RoStore extends AbstractSail {
 				}
 			}
 		}
-		namespaces = new RoNamespaces(subDataDirs.get(RoDirectories.NAMESPACES)
-				.toPath());
+		namespaces = new RoNamespaces();
+		try {
+			reinitIriDictionaries();
+			reinitPredicateStores();
+		} catch (IOException e) {
+			throw new SailException(e);
+		}
+	}
 
+	private void reinitIriDictionaries() {
+		iriDict = RoIriDictionary.load(getNamespaces());
+		literalDict = RoLiteralDict.load();
+		bnodeDict = RoBnodeDictionary.load();
 	}
 
 	public FederatedServiceResolver getFederatedServiceResolver() {
@@ -88,8 +102,8 @@ public class RoStore extends AbstractSail {
 		return namespaces;
 	}
 
-	public void load(File... files) throws RDFParseException,
-			RDFHandlerException, IOException {
+	public void load(File... files)
+			throws RDFParseException, RDFHandlerException, IOException {
 
 		final TempBNodeDictionary tempBNodeDictionary = new TempBNodeDictionary(
 				subDataDirs.get(RoDirectories.BNODE_DICTIONARIES));
@@ -99,33 +113,62 @@ public class RoStore extends AbstractSail {
 				subDataDirs.get(RoDirectories.IRI_DICTIONARIES));
 
 		for (File file : files) {
-			final Optional<RDFFormat> op = Rio.getParserFormatForFileName(file
-					.getName());
+			final Optional<RDFFormat> op = Rio
+					.getParserFormatForFileName(file.getName());
 			if (op.isPresent()) {
 				final RDFFormat format = op.get();
 				final RDFParser parser = Rio.createParser(format, vf);
 
-				parser.setRDFHandler(new LoaderHandler(this,
-						tempBNodeDictionary, tempIriDictionary,
-						tempLitalDictionary));
+				parser.setRDFHandler(
+						new DictionaryBuildingHandler(this, tempBNodeDictionary,
+								tempIriDictionary, tempLitalDictionary));
 				parser.parse(new FileReader(file), "");
 			}
 		}
 		bnodeDict = tempBNodeDictionary.load();
 		iriDict = tempIriDictionary.load();
+		literalDict = tempLitalDictionary.load();
 		for (File file : files) {
+			final Optional<RDFFormat> op = Rio
+					.getParserFormatForFileName(file.getName());
+			if (op.isPresent()) {
+				final RDFFormat format = op.get();
+				final RDFParser parser = Rio.createParser(format, vf);
 
+				final PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
+						this, bnodeDict, iriDict, literalDict, namespaces,
+						subDataDirs.get(RoDirectories.PREDICATE_LISTS));
+				parser.setRDFHandler(handler);
+				parser.parse(new FileReader(file), "");
+			}
 		}
 	}
 
-	public RoPredicateStore getPredicateStore(IRI predicate) {
+	private void reinitPredicateStores()
+			throws FileNotFoundException, IOException {
+		for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
+				.listFiles()) {
+			final RoPredicateStore roPredicateStore = new RoPredicateStore(
+					predicateDir, iriDict);
+			RoIri predicate = roPredicateStore.getPredicate();
+			stores.put(predicate, roPredicateStore);
+		}
+	}
+
+	public RoPredicateStore getPredicateStore(IRI predicate)
+			throws FileNotFoundException, IOException {
 		RoPredicateStore store = stores.get(predicate);
 		if (predicate == null) {
-			store = new RoPredicateStore(
-					subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate);
+			store = new RoPredicateStore(RoPredicateStore.initDirectory(
+					subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate),
+					iriDict);
 			stores.put(predicate, store);
 		}
 		return store;
+	}
+
+	public void addPredicateStore(RoPredicateStore build) {
+		stores.put(build.getPredicate(), build);
 	}
 
 }
