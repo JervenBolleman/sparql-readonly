@@ -26,11 +26,11 @@ import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
 
-	private class DataDistribution {
+	protected static class DataDistribution {
 		private String longestCommonPrefix;
-		private boolean hasCommonPrefix;
-		private int minLength;
-		private int maxLength;
+		private boolean hasCommonPrefix = true;
+		private int minLength = Integer.MAX_VALUE;
+		private int maxLength = Integer.MIN_VALUE;
 		private boolean allNumericAfterLongestCommonPrefix = true;
 
 		public String measure(String s) {
@@ -38,12 +38,12 @@ public class TempIriDictionary extends TempDictionary {
 			maxLength = Math.max(maxLength, s.length());
 			char[] a = s.toCharArray();
 			if (longestCommonPrefix == null) {
-				for (int i = a.length; i >= 0; i--) {
+				for (int i = a.length - 1; i >= 0; i--) {
 					char c = a[i];
 					if (!Character.isDigit(c) && c < 256) { // Only ascii
 															// codepoints for
 															// now
-						String prefix = s.substring(0, i);
+						String prefix = s.substring(0, i + 1);
 						if (longestCommonPrefix == null)
 							longestCommonPrefix = prefix;
 						else if (!prefix.equals(longestCommonPrefix))
@@ -80,8 +80,10 @@ public class TempIriDictionary extends TempDictionary {
 		final String namespace = subject.getNamespace();
 		FileOutputStream fos = namespaces_fos.get(namespace);
 		if (fos == null) {
-			fos = new FileOutputStream(new File(out, "temp-"
-					+ FileNameEncoderFunctions.encodeNamespace(namespace)));
+			File file = new File(out, "temp-"
+					+ FileNameEncoderFunctions.encodeNamespace(namespace));
+			Files.createFile(file.toPath());
+			fos = new FileOutputStream(file);
 			namespaces_fos.put(namespace, fos);
 		}
 		fos.write(
@@ -112,7 +114,9 @@ public class TempIriDictionary extends TempDictionary {
 			File tempFile = namespaceTempFile.file;
 			String namespace = namespaceTempFile.namespace;
 			File lengthString = new File(out, roNamespace.getId() + "-iris");
+			lengthString.createNewFile();
 			File offsetsFile = new File(roNamespace.getId() + "-offsets");
+			offsetsFile.createNewFile();
 
 			DataDistribution data = new DataDistribution();
 			{
@@ -140,7 +144,8 @@ public class TempIriDictionary extends TempDictionary {
 
 		return Files.lines(tempFile.toPath(), StandardCharsets.UTF_8)
 				.sorted(Collator.getInstance(Locale.US)).distinct()
-				.peek(s -> data.measure(s)).collect(Collectors.toList());
+				.peek(data::measure).collect(Collectors.toList());
+
 	}
 
 	private void writeNamespacesToDisk(final List<String> tempNodes,
@@ -205,7 +210,7 @@ public class TempIriDictionary extends TempDictionary {
 		public NamespaceFilePair(String s) {
 			this.namespace = s;
 			this.file = new File(out,
-					FileNameEncoderFunctions.encodeNamespace(s));
+					"temp-" + FileNameEncoderFunctions.encodeNamespace(s));
 		}
 	}
 

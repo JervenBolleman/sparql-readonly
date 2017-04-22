@@ -10,6 +10,7 @@ import java.nio.LongBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import org.eclipse.rdf4j.model.IRI;
 
@@ -106,6 +107,12 @@ public class RoIriDictionary {
 	public static RoIriDictionary load(RoNamespaces namespaces2) {
 		// TODO Auto-generated method stub
 		return null;
+	}
+
+	public Stream<IRI> values() {
+		return idToIriDictionaryMap.values().stream()
+				.flatMap(RoIriNamespaceDictionary::values);
+
 	}
 
 }

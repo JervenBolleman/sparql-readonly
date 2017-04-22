@@ -15,6 +15,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -25,23 +26,21 @@ import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 
 public class RoIriPrefixFollowedByNumberTest {
+	private static final String NAMESPACE = "http://example.org/test/";
+	private static final String PREFIX = "GO_";
 	@Rule
 	public TemporaryFolder folder = new TemporaryFolder();
 
 	@Test
-	public void basicConfigLoad() throws IOException {
+	public void directlyBuild() throws IOException {
 
 		File info = folder.newFile("info");
 		File bitmap = folder.newFile("bitmap");
-		File temp = folder.newFile("temp");
-		new TempIriDictionary(temp);
 
-		String namespace = "http://example.org/test/";
-		String prefix = "GO_";
-		RoNamespace roNamespace = new RoNamespace(prefix, namespace, 0);
+		RoNamespace roNamespace = new RoNamespace(PREFIX, NAMESPACE, 0);
 
 		List<String> infoS = Arrays.asList(new String[] {
-				String.valueOf(prefix.length()), prefix, "8", "8" });
+				String.valueOf(PREFIX.length()), PREFIX, "8", "8" });
 		Files.write(info.toPath(), infoS, StandardCharsets.UTF_8);
 		final RoaringBitmap rb = new RoaringBitmap();
 		rb.add(5);
@@ -52,23 +51,50 @@ public class RoIriPrefixFollowedByNumberTest {
 			rb.serialize(dos);
 		}
 		final RoNamespaces namespaces = new RoNamespaces();
-		namespaces.putOrGet(0, namespace);
+		namespaces.putOrGet(0, NAMESPACE);
+
 		final RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
 		final RoIriNamespaceDictionary dict = iriDictionary
 				.addPredixFollowedByBNumberDictionary(info, bitmap,
 						roNamespace);
 
-		assertEquals(namespace, dict.getNamespace());
+		assertEquals(NAMESPACE, dict.getNamespace());
 
-		assertEquals(prefix + "00010", dict.getLocalNameFromId(10).get());
-		assertEquals(prefix + "00005", dict.getLocalNameFromId(5).get());
+		assertEquals(PREFIX + "00010", dict.getLocalNameFromId(10).get());
+		assertEquals(PREFIX + "00005", dict.getLocalNameFromId(5).get());
 		assertFalse(dict.getLocalNameFromId(11).isPresent());
 
 		Iterator<IRI> values = dict.values().iterator();
 		assertTrue(values.hasNext());
 		IRI next = values.next();
-		String five = namespace + prefix + "00005";
-		String ten = namespace + prefix + "00010";
+		String five = NAMESPACE + PREFIX + "00005";
+		String ten = NAMESPACE + PREFIX + "00010";
+		assertEquals(five, next.stringValue());
+		assertTrue(values.hasNext());
+		next = values.next();
+		assertEquals(ten, next.stringValue());
+	}
+
+	@Test
+	public void buildViaTempDir() throws IOException {
+
+		File temp = folder.newFolder("tempiridictionary");
+		TempIriDictionary tempIriDictionary = new TempIriDictionary(temp);
+
+		IRI sTen = SimpleValueFactory.getInstance().createIRI(NAMESPACE,
+				PREFIX + "00010");
+		IRI sFive = SimpleValueFactory.getInstance().createIRI(NAMESPACE,
+				PREFIX + "00005");
+		tempIriDictionary.add(sTen);
+		tempIriDictionary.add(sFive);
+		tempIriDictionary.close();
+		RoIriDictionary roIriDictionary = tempIriDictionary.load();
+
+		Iterator<IRI> values = roIriDictionary.values().iterator();
+		assertTrue(values.hasNext());
+		IRI next = values.next();
+		String five = NAMESPACE + PREFIX + "00005";
+		String ten = NAMESPACE + PREFIX + "00010";
 		assertEquals(five, next.stringValue());
 		assertTrue(values.hasNext());
 		next = values.next();
