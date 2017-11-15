@@ -59,6 +59,7 @@ public class RoStoreTest {
 		final RoConfig config = fact.getConfig();
 		config.setFile(dir.toString());
 		RoStore store = fact.getSail(config);
+                store.initialize();
 		store.load(file);
 		assertNotNull(store);
 

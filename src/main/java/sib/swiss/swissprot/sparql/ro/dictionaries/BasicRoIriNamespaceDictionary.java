@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.apache.orc.Reader;
 
 import org.eclipse.rdf4j.model.IRI;
 
@@ -15,18 +16,16 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 
 	private final RoNamespace roNamespace;
 
-	public BasicRoIriNamespaceDictionary(long[] offSetMap,
-			ByteBuffer[] backingFile, RoNamespace roNamespace) {
-		super(offSetMap, backingFile);
+	public BasicRoIriNamespaceDictionary(Reader reader, RoNamespace roNamespace) {
+		super(reader);
 		this.roNamespace = roNamespace;
 	}
 
 	@Override
 	public Optional<String> getLocalNameFromId(long id) throws IOException {
 		int withoutMask = (int) id;
-		long offset = getOffset(withoutMask);
-		if (offset > -1)
-			return Optional.of(readStringAt(offset));
+		if (withoutMask > -1)
+			return Optional.of(readStringAt(withoutMask));
 		else
 			return Optional.empty();
 
