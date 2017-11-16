@@ -82,7 +82,7 @@ public class TempLiteralDictionary extends TempDictionary {
         TypeDescription schema;
         schema = TypeDescription.createStruct()
                 .addField(LABEL, TypeDescription.createString())
-                .addField(DATATYPE_ID, TypeDescription.createByte())
+                .addField(DATATYPE_ID, TypeDescription.createLong())
                 .addField(RoLiteralDict.LANGUAGE, TypeDescription.createString());
         VectorizedRowBatch batch = schema.createRowBatch();
         File file = new File(out.getAbsolutePath(), RoLiteralDict.PATH_NAME);

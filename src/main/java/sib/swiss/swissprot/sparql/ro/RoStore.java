@@ -5,6 +5,7 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
@@ -36,7 +37,7 @@ public class RoStore extends AbstractSail {
     private RoValueFactory vf;
     private final FederatedServiceResolver federatedServiceResolver;
     private RoNamespaces namespaces;
-    private Map<IRI, RoPredicateStore> stores;
+    private Map<IRI, RoPredicateStore> stores = new HashMap<>();
     private final Map<RoDirectories, File> subDataDirs = new EnumMap<>(
             RoDirectories.class);
     private RoIriDictionary iriDict;
@@ -96,6 +97,7 @@ public class RoStore extends AbstractSail {
         } catch (IOException e) {
             throw new SailException(e);
         }
+        vf = new RoValueFactory();
     }
 
     private void reinitIriDictionaries() throws IOException {
@@ -174,6 +176,7 @@ public class RoStore extends AbstractSail {
                 parser.parse(new FileReader(file), "");
             }
         }
+        reinitPredicateStores();
     }
 
     private void reinitPredicateStores()
@@ -201,6 +204,10 @@ public class RoStore extends AbstractSail {
 
     public void addPredicateStore(RoPredicateStore build) {
         stores.put(build.getPredicate(), build);
+    }
+
+    Map<IRI, RoPredicateStore> getPredicateStores() {
+        return stores;
     }
 
 }

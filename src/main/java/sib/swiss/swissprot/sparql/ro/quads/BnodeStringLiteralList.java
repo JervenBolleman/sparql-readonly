@@ -32,7 +32,7 @@ public class BnodeStringLiteralList extends RoResourceRoValueList {
 			RoNamespaces roNamespaces, RoIriDictionary iriDictionary)
 			throws IOException {
 		super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-				iriDictionary);
+				iriDictionary,null);
 		this.dict = dict;
 	}
 
@@ -42,20 +42,18 @@ public class BnodeStringLiteralList extends RoResourceRoValueList {
 	}
 
 	public static class Builder extends AbstractBuilder {
-		private RoLiteralDict dict2;
 
 		public Builder(File file, RoIri predicate, RoLiteralDict dict,
 				RoNamespaces roNamespaces, RoIriDictionary iriDictionary)
 				throws IOException {
-			super(file, predicate, roNamespaces, iriDictionary);
-			dict2 = dict;
+			super(file, predicate, roNamespaces, iriDictionary, dict);
 		}
 
 		public BnodeStringLiteralList build() throws IOException {
 			das.close();
 			saveContextBitmaps();
 			return new BnodeStringLiteralList(file, predicate, bNodeGraphsMap,
-					iriGraphsMap, dict2, namespaces, iriDictionary);
+					iriGraphsMap, literalDictionary, namespaces, iriDictionary);
 		}
 	}
 

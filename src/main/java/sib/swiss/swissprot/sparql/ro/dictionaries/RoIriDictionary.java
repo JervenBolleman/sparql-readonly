@@ -1,12 +1,8 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.LongBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -22,18 +18,18 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 public class RoIriDictionary {
 
     public static final String IRI_VALUE = "iri_value";
-    private final Map<Integer, RoIriNamespaceDictionary> idToIriDictionaryMap;
+    private final Map<Long, RoIriNamespaceDictionary> idToIriDictionaryMap;
     private final RoNamespaces namespaces;
 
     public Optional<String> getLocalNameFromId(long id) throws IOException {
-        int namespaceId = (int) (id >>> 32);
+        long namespaceId = (id >>> 32);
         RoIriNamespaceDictionary namespace = idToIriDictionaryMap
                 .get(namespaceId);
         return namespace.getLocalNameFromId(id);
     }
 
     public RoIriDictionary(
-            Map<Integer, RoIriNamespaceDictionary> idToIriDictionary,
+            Map<Long, RoIriNamespaceDictionary> idToIriDictionary,
             RoNamespaces namespaces) {
         super();
         this.idToIriDictionaryMap = idToIriDictionary;
@@ -47,8 +43,11 @@ public class RoIriDictionary {
     }
 
     public Optional<RoIri> find(IRI iri) {
-        final String namespace = iri.getNamespace();
-        final RoNamespace key = namespaces.get(namespace);
+        Optional<RoNamespace> has = namespaces.find(iri);
+        if (!has.isPresent()) {
+            return Optional.empty();
+        }
+        final RoNamespace key = has.get();
         if (this.idToIriDictionaryMap.containsKey(key.getId())) {
             return this.idToIriDictionaryMap.get(key.getId()).find(iri);
         } else {
@@ -67,7 +66,8 @@ public class RoIriDictionary {
             throws IOException {
         RoIriPrefixFollowedByNumberDictionary temp = new RoIriPrefixFollowedByNumberDictionary(
                 offsetsFile, lengthString, roNamespace, this);
-        idToIriDictionaryMap.put(idToIriDictionaryMap.size(), temp);
+        idToIriDictionaryMap.put(roNamespace.getId(), temp);
+        namespaces.putIfAbsent(roNamespace.getPrefix(), roNamespace);
         return temp;
     }
 
@@ -75,32 +75,11 @@ public class RoIriDictionary {
             Reader reader, RoNamespace roNamespace)
             throws FileNotFoundException, IOException {
         BasicRoIriNamespaceDictionary temp = new BasicRoIriNamespaceDictionary(reader,
-                roNamespace);
-        idToIriDictionaryMap.put(idToIriDictionaryMap.size(), temp);
+                roNamespace, this);
+        idToIriDictionaryMap.put(roNamespace.getId(), temp);
+        namespaces.putIfAbsent(roNamespace.getPrefix(), roNamespace);
         return temp;
 
-    }
-
-    private long[] readOffsetMapIntoMemory(File offsetsFile)
-            throws FileNotFoundException, IOException {
-        long[] map = new long[(int) (offsetsFile.length() / Long.BYTES)];
-        int key = 0;
-        try (InputStream reader = new FileInputStream(offsetsFile)) {
-            byte[] singleOffset = new byte[Long.BYTES];
-            LongBuffer singleOffsetAsLong = ByteBuffer.wrap(singleOffset)
-                    .asLongBuffer();
-            for (int i = 0; i < Long.BYTES; i++) {
-                final int read = reader.read();
-                if (read == -1) {
-                    return map;
-                }
-                singleOffset[i] = (byte) read;
-
-            }
-            map[key] = singleOffsetAsLong.get(0);
-            key++;
-        }
-        return map;
     }
 
     public Stream<IRI> values() {

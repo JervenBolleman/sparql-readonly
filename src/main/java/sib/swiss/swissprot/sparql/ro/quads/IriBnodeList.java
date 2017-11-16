@@ -24,7 +24,7 @@ public class IriBnodeList extends RoResourceRoValueList {
 			Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces namespaces,
 			RoIriDictionary dictionary) throws IOException {
 		super(file, predicate, iriGraphsMap, bNodeGraphsMap, namespaces,
-				dictionary);
+				dictionary,null);
 	}
 
 	public IriBnodeList(File file, RoIri predicate)
@@ -36,12 +36,13 @@ public class IriBnodeList extends RoResourceRoValueList {
 		public Builder(File file, RoIri predicate,
 				RoIriDictionary iriDictionary, RoNamespaces namespaces)
 				throws IOException {
-			super(file, predicate, namespaces, iriDictionary);
+			super(file, predicate, namespaces, iriDictionary,null);
 		}
 
 		public IriBnodeList build() throws IOException {
 			das.close();
 			saveContextBitmaps();
+                        saveNamespace(namespaces, file);
 			return new IriBnodeList(file, predicate, bNodeGraphsMap,
 					iriGraphsMap, namespaces, iriDictionary);
 		}

@@ -1,10 +1,16 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Optional;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
+import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
+import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
 import org.apache.orc.Reader;
+import org.apache.orc.RecordReader;
 
 import org.eclipse.rdf4j.model.IRI;
 
@@ -12,46 +18,71 @@ import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
-		implements RoIriNamespaceDictionary {
+        implements RoIriNamespaceDictionary {
 
-	private final RoNamespace roNamespace;
+    public static final String LOCAL_NAME_COLUMN = "local_name_value";
 
-	public BasicRoIriNamespaceDictionary(Reader reader, RoNamespace roNamespace) {
-		super(reader);
-		this.roNamespace = roNamespace;
-	}
+    private final RoNamespace roNamespace;
+    private final RoIriDictionary roIriDictionary;
 
-	@Override
-	public Optional<String> getLocalNameFromId(long id) throws IOException {
-		int withoutMask = (int) id;
-		if (withoutMask > -1)
-			return Optional.of(readStringAt(withoutMask));
-		else
-			return Optional.empty();
+    public BasicRoIriNamespaceDictionary(Reader reader, RoNamespace roNamespace,
+            RoIriDictionary roIriDictionary) {
+        super(reader);
+        this.roNamespace = roNamespace;
+        this.roIriDictionary = roIriDictionary;
+    }
 
-	}
+    @Override
+    public Optional<String> getLocalNameFromId(long id) throws IOException {
+        if (nameSpacedId(id) == (long) roNamespace.getId()) {
+            final int idWithoutNamespaceId = (int) id;
+            return Optional.of(readStringAt(idWithoutNamespaceId));
+        } else {
+            return Optional.empty();
+        }
+    }
 
-	@Override
-	public String getNamespace() {
-		return roNamespace.getName();
-	}
+    @Override
+    public String getNamespace() {
+        return roNamespace.getName();
+    }
 
-	@Override
-	public int getNamespaceId() {
-		return roNamespace.getId();
-	}
+    @Override
+    public int getNamespaceId() {
+        return (int) roNamespace.getId();
+    }
 
-	@Override
-	public Optional<RoIri> find(IRI predicate) {
-		if (predicate.getNamespace().equals(roNamespace.getName())) {
+    @Override
+    public Optional<RoIri> find(IRI predicate) {
+        if (predicate.getNamespace().equals(roNamespace.getName())) {
+            try {
+                final Reader.Options options = new Reader.Options();
+                SearchArgument equals = SearchArgumentFactory.newBuilder().equals(LOCAL_NAME_COLUMN, PredicateLeaf.Type.STRING, predicate.getLocalName()).build();
+                options.searchArgument(equals, new String[]{LOCAL_NAME_COLUMN});
+                RecordReader rows = reader.rows(options);
+                VectorizedRowBatch batch = schema.createRowBatch(1);
+                final boolean nextBatch = rows.nextBatch(batch);
+                final long id = rows.getRowNumber();
+                if (nextBatch) {
+                    final RoIri roIri = new RoIri(nameSpacedId(id), roIriDictionary);
+                    return Optional.of(roIri);
+                } else {
+                    return Optional.empty();
+                }
+            } catch (IOException ex) {
+                Logger.getLogger(BasicRoIriNamespaceDictionary.class.getName()).log(Level.SEVERE, null, ex);
+            }
+        }
+        return Optional.empty();
+    }
 
-		}
-		return Optional.empty();
-	}
+    private long nameSpacedId(long id) {
+        return id >>> 32;
+    }
 
-	@Override
-	public Stream<IRI> values() {
-		// TODO Auto-generated method stub
-		return Stream.empty();
-	}
+    @Override
+    public Stream<IRI> values() {
+        // TODO Auto-generated method stub
+        return Stream.empty();
+    }
 }

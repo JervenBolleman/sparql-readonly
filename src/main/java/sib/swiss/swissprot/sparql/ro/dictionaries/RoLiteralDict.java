@@ -56,7 +56,7 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
             final Reader.Options options = new Reader.Options();
             SearchArgument equals = SearchArgumentFactory.newBuilder()
                     .equals(LABEL, PredicateLeaf.Type.STRING, value.stringValue())
-                    .equals(DATATYPE_ID, PredicateLeaf.Type.LONG, datatypeCode(value.getDatatype()))
+                    .equals(DATATYPE_ID, PredicateLeaf.Type.LONG, (long) datatypeCode(value.getDatatype()))
                     .equals(LANGUAGE, PredicateLeaf.Type.STRING, value.getLanguage().orElse(""))
                     .build();
 

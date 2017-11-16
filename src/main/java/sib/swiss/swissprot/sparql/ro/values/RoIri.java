@@ -8,43 +8,45 @@ import org.eclipse.rdf4j.model.IRI;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class RoIri implements IRI, RoResource {
-	private static final long serialVersionUID = 1L;
-	private final RoIriDictionary dict;
-	private final long id;
 
-	public RoIri(long id, RoIriDictionary dict) {
-		super();
-		this.id = id;
-		this.dict = dict;
-	}
+    private static final long serialVersionUID = 1L;
+    private final RoIriDictionary dict;
+    private final long id;
 
-	@Override
-	public String stringValue() {
-		return getNamespace() + getLocalName();
-	}
+    public RoIri(long id, RoIriDictionary dict) {
+        super();
+        this.id = id;
+        this.dict = dict;
+    }
 
-	@Override
-	public String getNamespace() {
+    @Override
+    public String stringValue() {
+        return getNamespace() + getLocalName();
+    }
 
-		return dict.getNamespaces().getFromId(id).getName();
-	}
+    @Override
+    public String getNamespace() {
 
-	@Override
-	public String getLocalName() {
-		try {
-			final Optional<String> localNameFromId = dict
-					.getLocalNameFromId(id);
-			if (localNameFromId.isPresent())
-				return localNameFromId.get();
-			else
-				throw new RuntimeException("No local name for " + id);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-	}
+        return dict.getNamespaces().getFromId(id).getName();
+    }
 
-	@Override
-	public long getLongId() {
-		return id;
-	}
+    @Override
+    public String getLocalName() {
+        try {
+            final Optional<String> localNameFromId = dict
+                    .getLocalNameFromId(id);
+            if (localNameFromId.isPresent()) {
+                return localNameFromId.get();
+            } else {
+                throw new RuntimeException("No local name for " + id);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public long getLongId() {
+        return id;
+    }
 }

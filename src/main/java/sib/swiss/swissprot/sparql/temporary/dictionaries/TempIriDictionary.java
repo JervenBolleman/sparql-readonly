@@ -56,9 +56,15 @@ public class TempIriDictionary extends TempDictionary {
                         String prefix = s.substring(0, i + 1);
                         if (longestCommonPrefix == null) {
                             longestCommonPrefix = prefix;
+                            if (i == a.length - 1) {
+                                hasCommonPrefix = false;
+                                allNumericAfterLongestCommonPrefix = false;
+                            }
                         } else if (!prefix.equals(longestCommonPrefix)) {
                             hasCommonPrefix = false;
+                            allNumericAfterLongestCommonPrefix = false;
                         }
+
                         return s;
                     }
                 }
@@ -144,6 +150,11 @@ public class TempIriDictionary extends TempDictionary {
                 iriDictionary.addPredixFollowedByBNumberDictionary(offsetsFile, lengthString, roNamespace);
             } else {
 
+                File iriFile = new File(out.getAbsolutePath(), roNamespace.getId() + "-iris");
+                if (!iriFile.exists()) {
+                    iriFile.createNewFile();
+                }
+
                 Reader irireader = OrcFile.createReader(iripath, OrcFile.readerOptions(conf));
                 iriDictionary.addBasicRoIriNamespaceDictionary(irireader, roNamespace);
             }
@@ -175,12 +186,11 @@ public class TempIriDictionary extends TempDictionary {
 
     private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, Path iriPath, Configuration conf)
             throws IOException, FileNotFoundException {
-        final Path path = new Path(out.getAbsolutePath(), "bnodes");
         TypeDescription schema = TypeDescription.createStruct()
                 .addField(RoIriDictionary.IRI_VALUE, TypeDescription.createString());
         VectorizedRowBatch batch = schema.createRowBatch();
         BytesColumnVector col = (BytesColumnVector) batch.cols[0];
-        try (Writer writer = OrcFile.createWriter(path,
+        try (Writer writer = OrcFile.createWriter(iriPath,
                 OrcFile.writerOptions(conf)
                         .setSchema(schema)
                         .compress(CompressionKind.LZ4))) {
@@ -217,6 +227,7 @@ public class TempIriDictionary extends TempDictionary {
             data2.longestCommonPrefix, String.valueOf(data2.minLength),
             String.valueOf(data2.maxLength)});
         Files.write(offsetsFile.toPath(), info, StandardCharsets.UTF_8);
+
     }
 
     private final class NamespaceFilePair {

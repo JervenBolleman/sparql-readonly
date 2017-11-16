@@ -4,198 +4,217 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import org.eclipse.rdf4j.model.IRI;
 
 public class RoNamespaces implements Map<String, RoNamespace> {
 
-	private Map<String, RoNamespace> namespaces;
-	private RoNamespace[] namespaceArray;
+    private final Map<String, RoNamespace> namespaces;
+    private RoNamespace[] namespaceArray;
 
-	@Override
-	public int size() {
-		return namespaces.size();
-	}
+    @Override
+    public int size() {
+        return namespaces.size();
+    }
 
-	@Override
-	public boolean isEmpty() {
-		return namespaces.isEmpty();
-	}
+    @Override
+    public boolean isEmpty() {
+        return namespaces.isEmpty();
+    }
 
-	@Override
-	public boolean containsKey(Object key) {
-		return namespaces.containsKey(key);
-	}
+    @Override
+    public boolean containsKey(Object key) {
+        return namespaces.containsKey(key);
+    }
 
-	@Override
-	public boolean containsValue(Object value) {
-		return namespaces.containsValue(value);
-	}
+    @Override
+    public boolean containsValue(Object value) {
+        return namespaces.containsValue(value);
+    }
 
-	@Override
-	public RoNamespace get(Object key) {
-		return namespaces.get(key);
-	}
+    @Override
+    public RoNamespace get(Object key) {
+        return namespaces.get(key);
+    }
 
-	@Override
-	public RoNamespace put(String key, RoNamespace value) {
-		return namespaces.put(key, value);
-	}
+    public Optional<RoNamespace> find(RoNamespace key) {
 
-	@Override
-	public RoNamespace remove(Object key) {
-		return namespaces.remove(key);
-	}
+        for (RoNamespace n : namespaceArray) {
+            if (n.equals(key)) {
+                return Optional.of(n);
+            }
+        }
+        return Optional.empty();
+    }
 
-	@Override
-	public void putAll(Map<? extends String, ? extends RoNamespace> m) {
-		namespaces.putAll(m);
-	}
+    public Optional<RoNamespace> find(IRI key) {
+        final String namespace = key.getNamespace();
+        for (RoNamespace n : namespaceArray) {
+            if (n.getName().equals(namespace)) {
+                return Optional.of(n);
+            }
+        }
+        return Optional.empty();
+    }
 
-	@Override
-	public void clear() {
-		namespaces.clear();
-	}
+    @Override
+    public RoNamespace put(String key, RoNamespace value) {
+        return namespaces.put(key, value);
+    }
 
-	@Override
-	public Set<String> keySet() {
-		return namespaces.keySet();
-	}
+    @Override
+    public RoNamespace remove(Object key) {
+        return namespaces.remove(key);
+    }
 
-	@Override
-	public Collection<RoNamespace> values() {
-		return namespaces.values();
-	}
+    @Override
+    public void putAll(Map<? extends String, ? extends RoNamespace> m) {
+        namespaces.putAll(m);
+    }
 
-	@Override
-	public Set<java.util.Map.Entry<String, RoNamespace>> entrySet() {
-		return namespaces.entrySet();
-	}
+    @Override
+    public void clear() {
+        namespaces.clear();
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		return namespaces.equals(o);
-	}
+    @Override
+    public Set<String> keySet() {
+        return namespaces.keySet();
+    }
 
-	@Override
-	public int hashCode() {
-		return namespaces.hashCode();
-	}
+    @Override
+    public Collection<RoNamespace> values() {
+        return namespaces.values();
+    }
 
-	@Override
-	public RoNamespace getOrDefault(Object key, RoNamespace defaultValue) {
-		return namespaces.getOrDefault(key, defaultValue);
-	}
+    @Override
+    public Set<java.util.Map.Entry<String, RoNamespace>> entrySet() {
+        return namespaces.entrySet();
+    }
 
-	@Override
-	public void forEach(
-			BiConsumer<? super String, ? super RoNamespace> action) {
-		namespaces.forEach(action);
-	}
+    @Override
+    public boolean equals(Object o) {
+        return namespaces.equals(o);
+    }
 
-	@Override
-	public void replaceAll(
-			BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> function) {
-		namespaces.replaceAll(function);
-	}
+    @Override
+    public int hashCode() {
+        return namespaces.hashCode();
+    }
 
-	@Override
-	public RoNamespace putIfAbsent(String key, RoNamespace value) {
-		return namespaces.putIfAbsent(key, value);
-	}
+    @Override
+    public RoNamespace getOrDefault(Object key, RoNamespace defaultValue) {
+        return namespaces.getOrDefault(key, defaultValue);
+    }
 
-	@Override
-	public boolean remove(Object key, Object value) {
-		return namespaces.remove(key, value);
-	}
+    @Override
+    public void forEach(
+            BiConsumer<? super String, ? super RoNamespace> action) {
+        namespaces.forEach(action);
+    }
 
-	@Override
-	public boolean replace(String key, RoNamespace oldValue,
-			RoNamespace newValue) {
-		return namespaces.replace(key, oldValue, newValue);
-	}
+    @Override
+    public void replaceAll(
+            BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> function) {
+        namespaces.replaceAll(function);
+    }
 
-	@Override
-	public RoNamespace replace(String key, RoNamespace value) {
-		return namespaces.replace(key, value);
-	}
+    @Override
+    public RoNamespace putIfAbsent(String key, RoNamespace value) {
+        return namespaces.putIfAbsent(key, value);
+    }
 
-	@Override
-	public RoNamespace computeIfAbsent(String key,
-			Function<? super String, ? extends RoNamespace> mappingFunction) {
-		return namespaces.computeIfAbsent(key, mappingFunction);
-	}
+    @Override
+    public boolean remove(Object key, Object value) {
+        return namespaces.remove(key, value);
+    }
 
-	@Override
-	public RoNamespace computeIfPresent(String key,
-			BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
-		return namespaces.computeIfPresent(key, remappingFunction);
-	}
+    @Override
+    public boolean replace(String key, RoNamespace oldValue,
+            RoNamespace newValue) {
+        return namespaces.replace(key, oldValue, newValue);
+    }
 
-	@Override
-	public RoNamespace compute(String key,
-			BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
-		return namespaces.compute(key, remappingFunction);
-	}
+    @Override
+    public RoNamespace replace(String key, RoNamespace value) {
+        return namespaces.replace(key, value);
+    }
 
-	@Override
-	public RoNamespace merge(String key, RoNamespace value,
-			BiFunction<? super RoNamespace, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
-		return namespaces.merge(key, value, remappingFunction);
-	}
+    @Override
+    public RoNamespace computeIfAbsent(String key,
+            Function<? super String, ? extends RoNamespace> mappingFunction) {
+        return namespaces.computeIfAbsent(key, mappingFunction);
+    }
 
-	public RoNamespaces() {
-		namespaceArray = new RoNamespace[0];
-		namespaces = new LinkedHashMap<>();
-	}
+    @Override
+    public RoNamespace computeIfPresent(String key,
+            BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
+        return namespaces.computeIfPresent(key, remappingFunction);
+    }
 
-	public Collection<RoNamespace> getNamespaces() {
+    @Override
+    public RoNamespace compute(String key,
+            BiFunction<? super String, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
+        return namespaces.compute(key, remappingFunction);
+    }
 
-		return namespaces.values();
-	}
+    @Override
+    public RoNamespace merge(String key, RoNamespace value,
+            BiFunction<? super RoNamespace, ? super RoNamespace, ? extends RoNamespace> remappingFunction) {
+        return namespaces.merge(key, value, remappingFunction);
+    }
 
-	public RoNamespace getFromId(long id) {
+    public RoNamespaces() {
+        namespaceArray = new RoNamespace[0];
+        namespaces = new LinkedHashMap<>();
+    }
 
-		int intId = (int) (id >> 32);
-		return namespaceArray[intId];
-	}
+    public Collection<RoNamespace> getNamespaces() {
 
-	static RoNamespace fromSavedString(String s, int i) {
-		int firstColon = s.indexOf(':');
-		String prefix = s.substring(0, firstColon);
-		String namespace = s.substring(firstColon + 1);
-		return new RoNamespace(prefix, namespace, i);
-	}
+        return namespaces.values();
+    }
 
-	public void add(String prefix, String uri) {
-		if (!namespaces.containsValue(uri)) {
-			namespaceArray = Arrays.copyOf(namespaceArray,
-					namespaceArray.length + 1);
-			RoNamespace roNamespace = new RoNamespace(prefix, uri,
-					namespaceArray.length - 1);
-			namespaceArray[namespaceArray.length - 1] = roNamespace;
-			namespaces.put(prefix, roNamespace);
-		}
-	}
+    public RoNamespace getFromId(long id) {
 
-	public static RoNamespaces getInstance() {
-		return null;
-	}
+        int intId = (int) (id >> 32);
+        return namespaceArray[intId];
+    }
 
-	public RoNamespace putOrGet(int i, String namespace) {
-		if (namespaceArray.length < i)
-			return namespaceArray[i];
-		else if (i >= namespaceArray.length) {
-			namespaceArray = Arrays.copyOf(namespaceArray, i + 1);
-			RoNamespace toAdd = new RoNamespace(null, namespace, i);
-			namespaceArray[i] = toAdd;
-			return toAdd;
+    static RoNamespace fromSavedString(String s, int i) {
+        int firstColon = s.indexOf(':');
+        String prefix = s.substring(0, firstColon);
+        String namespace = s.substring(firstColon + 1);
+        return new RoNamespace(prefix, namespace, i);
+    }
 
-		} else
-			return getNamespaces().stream()
-					.filter(n -> n.getName().equals(namespace)).findAny().get();
+    public void add(String prefix, String uri) {
+        if (!namespaces.containsValue(uri)) {
+            namespaceArray = Arrays.copyOf(namespaceArray,
+                    namespaceArray.length + 1);
+            RoNamespace roNamespace = new RoNamespace(prefix, uri,
+                    namespaceArray.length - 1);
+            namespaceArray[namespaceArray.length - 1] = roNamespace;
+            namespaces.put(prefix, roNamespace);
+        }
+    }
 
-	}
+    public RoNamespace putOrGet(int i, String namespace) {
+        if (namespaceArray.length < i) {
+            return namespaceArray[i];
+        } else if (i >= namespaceArray.length) {
+            namespaceArray = Arrays.copyOf(namespaceArray, i + 1);
+            RoNamespace toAdd = new RoNamespace(null, namespace, i);
+            namespaceArray[i] = toAdd;
+            return toAdd;
+
+        } else {
+            return getNamespaces().stream()
+                    .filter(n -> n.getName().equals(namespace)).findAny().get();
+        }
+
+    }
 }

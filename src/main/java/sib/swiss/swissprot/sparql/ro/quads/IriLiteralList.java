@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
 
-import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 
@@ -16,49 +15,51 @@ import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
+import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
+import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
+import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
-public class IriIriList extends RoResourceRoValueList
-        implements Iterable<Statement> {
+public class IriLiteralList extends RoResourceRoValueList {
 
-    public IriIriList(File file, RoIri predicate,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
-            RoIriDictionary iriDictionary) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, null);
-
-    }
-
-    public IriIriList(File file, RoIri predicate)
+    public IriLiteralList(File file, RoIri predicate)
             throws FileNotFoundException, IOException {
         super(file, predicate);
     }
 
+    public IriLiteralList(File file, RoIri predicate,
+            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
+            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
+            RoIriDictionary iriDictionary, RoLiteralDict literalDictionary) throws IOException {
+        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
+                iriDictionary, literalDictionary);
+
+    }
+
     @Override
     public Iterator<Statement> iterator() {
-        return new IriIriListIterator();
+        return new IriLiteralListIterator();
     }
 
     public static class Builder extends AbstractBuilder {
 
         public Builder(File file, RoIri predicate,
-                RoIriDictionary iriDictionary, RoNamespaces namespaces)
+                RoIriDictionary iriDictionary, RoNamespaces namespaces, RoLiteralDict literalDict)
                 throws IOException {
-            super(file, predicate, namespaces, iriDictionary, null);
+            super(file, predicate, namespaces, iriDictionary, literalDict);
         }
 
-        public IriIriList build() throws IOException {
+        public IriLiteralList build() throws IOException {
             das.close();
             saveContextBitmaps();
             saveNamespace(namespaces, file);
-            return new IriIriList(file, predicate, bNodeGraphsMap, iriGraphsMap,
-                    namespaces, iriDictionary);
+            return new IriLiteralList(file, predicate, bNodeGraphsMap,
+                    iriGraphsMap, namespaces, iriDictionary, literalDictionary);
         }
     }
 
-    private class IriIriListIterator implements Iterator<Statement> {
+    private class IriLiteralListIterator implements Iterator<Statement> {
 
         private int at = 0;
 
@@ -70,24 +71,11 @@ public class IriIriList extends RoResourceRoValueList
         @Override
         public Statement next() {
             final RoResource graph = findGraphForTriple(at);
-            long subjectId = getLongAtIndexInLongBuffers(at++, triples); // increment
-            // after
-            // use
+            long subjectId = getLongAtIndexInLongBuffers(at++, triples);
             long objectId = getLongAtIndexInLongBuffers(at++, triples);
+            return new RoContextStatement(new RoIri(subjectId, iriDictionary),
+                    predicate, new RoSimpleLiteral(objectId, literalDict), graph);
 
-            if (graph instanceof BNode) {
-                return new RoContextStatement(
-                        new RoIri(subjectId, iriDictionary), predicate,
-                        new RoIri(objectId, iriDictionary), graph);
-            } else if (graph instanceof RoIri){
-                return new OnlyRoIriContextStatement(subjectId,
-                        predicate.getLongId(), objectId, graph.getLongId(),
-                        iriDictionary);
-            } else
-            {
-                return new OnlyRoIriStatement(subjectId, predicate.getLongId(), objectId, iriDictionary);
-            }
         }
-
     }
 }

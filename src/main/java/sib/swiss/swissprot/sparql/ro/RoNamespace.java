@@ -3,37 +3,39 @@ package sib.swiss.swissprot.sparql.ro;
 import org.eclipse.rdf4j.model.Namespace;
 
 public class RoNamespace implements Namespace {
-	private static final long serialVersionUID = 1L;
-	private final String prefix;
-	private final String name;
-	private final int id;
 
-	public RoNamespace(String prefix, String namespace, int id) {
-		this.prefix = prefix;
-		this.name = namespace;
-		this.id = id;
-	}
+    private static final long serialVersionUID = 1L;
+    private final String prefix;
+    private final String name;
+    private final long id;
 
-	@Override
-	public int compareTo(Namespace o) {
-		int compare = name.compareTo(o.getName());
-		if (compare == 0)
-			compare = prefix.compareTo(getPrefix());
-		return compare;
-	}
+    public RoNamespace(String prefix, String namespace, long id) {
+        this.prefix = prefix;
+        this.name = namespace;
+        this.id = id;
+    }
 
-	@Override
-	public String getName() {
-		return name;
-	}
+    @Override
+    public int compareTo(Namespace o) {
+        int compare = name.compareTo(o.getName());
+        if (compare == 0) {
+            compare = prefix.compareTo(getPrefix());
+        }
+        return compare;
+    }
 
-	@Override
-	public String getPrefix() {
-		return prefix;
-	}
+    @Override
+    public String getName() {
+        return name;
+    }
 
-	public int getId() {
-		return id;
-	}
+    @Override
+    public String getPrefix() {
+        return prefix;
+    }
+
+    public long getId() {
+        return id;
+    }
 
 }

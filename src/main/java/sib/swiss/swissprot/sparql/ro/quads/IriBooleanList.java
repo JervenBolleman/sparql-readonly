@@ -19,10 +19,10 @@ import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
-public class IriIriList extends RoResourceRoValueList
+public class IriBooleanList extends RoResourceRoValueList
         implements Iterable<Statement> {
 
-    public IriIriList(File file, RoIri predicate,
+    public IriBooleanList(File file, RoIri predicate,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
             Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
             RoIriDictionary iriDictionary) throws IOException {
@@ -31,7 +31,7 @@ public class IriIriList extends RoResourceRoValueList
 
     }
 
-    public IriIriList(File file, RoIri predicate)
+    public IriBooleanList(File file, RoIri predicate)
             throws FileNotFoundException, IOException {
         super(file, predicate);
     }
@@ -49,11 +49,11 @@ public class IriIriList extends RoResourceRoValueList
             super(file, predicate, namespaces, iriDictionary, null);
         }
 
-        public IriIriList build() throws IOException {
+        public IriBooleanList build() throws IOException {
             das.close();
             saveContextBitmaps();
             saveNamespace(namespaces, file);
-            return new IriIriList(file, predicate, bNodeGraphsMap, iriGraphsMap,
+            return new IriBooleanList(file, predicate, bNodeGraphsMap, iriGraphsMap,
                     namespaces, iriDictionary);
         }
     }
@@ -79,15 +79,14 @@ public class IriIriList extends RoResourceRoValueList
                 return new RoContextStatement(
                         new RoIri(subjectId, iriDictionary), predicate,
                         new RoIri(objectId, iriDictionary), graph);
-            } else if (graph instanceof RoIri){
+            } else {
                 return new OnlyRoIriContextStatement(subjectId,
                         predicate.getLongId(), objectId, graph.getLongId(),
                         iriDictionary);
-            } else
-            {
-                return new OnlyRoIriStatement(subjectId, predicate.getLongId(), objectId, iriDictionary);
             }
         }
 
     }
+    
+    
 }

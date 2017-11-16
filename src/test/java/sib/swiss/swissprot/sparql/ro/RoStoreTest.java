@@ -14,6 +14,7 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
+import static org.junit.Assert.assertEquals;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -29,7 +30,7 @@ public class RoStoreTest {
 	private static final IRI PREDICATE = VF
 			.createIRI("http://example.org/predicate");
 	private static final Literal OBJECT = VF.createLiteral(true);
-
+        private static final Literal OBJECT2 = VF.createLiteral("hello");  
 	@Before
 	public void init() throws Exception {
 		dir = folder.newFolder().toPath();
@@ -47,12 +48,14 @@ public class RoStoreTest {
 
 	@Test
 	public void basicTipleLoad() throws IOException {
-		File file = folder.newFile();
+		File file = folder.newFile("test.ttl");
 		final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE,
 				new FileOutputStream(file));
 		writer.startRDF();
 
 		writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, OBJECT));
+                writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, OBJECT2));
+                writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, PREDICATE));
 		writer.endRDF();
 
 		RoStoreFactory fact = new RoStoreFactory();
@@ -63,5 +66,6 @@ public class RoStoreTest {
 		store.load(file);
 		assertNotNull(store);
 
+                assertEquals(2, store.getConnection().size());
 	}
 }

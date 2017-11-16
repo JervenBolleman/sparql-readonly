@@ -23,133 +23,136 @@ import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class RoIriPrefixFollowedByNumberDictionary
-		implements RoIriNamespaceDictionary {
+        implements RoIriNamespaceDictionary {
 
-	private final class OfIntImplementation implements OfInt {
-		final long max = bitmap.getLongCardinality();
-		final IntIterator intIterator = bitmap.getIntIterator();
+    private final class OfIntImplementation implements OfInt {
 
-		@Override
-		public long estimateSize() {
-			return max;
-		}
+        final long max = bitmap.getLongCardinality();
+        final IntIterator intIterator = bitmap.getIntIterator();
 
-		@Override
-		public int characteristics() {
-			return ORDERED | SORTED | DISTINCT | IMMUTABLE | SIZED;
-		}
+        @Override
+        public long estimateSize() {
+            return max;
+        }
 
-		@Override
-		public OfInt trySplit() {
-			// TODO Auto-generated method stub
-			return null;
-		}
+        @Override
+        public int characteristics() {
+            return ORDERED | SORTED | DISTINCT | IMMUTABLE | SIZED;
+        }
 
-		@Override
-		public boolean tryAdvance(IntConsumer action) {
-			if (intIterator.hasNext()) {
-				action.accept(intIterator.next());
-				return true;
-			} else {
-				return false;
-			}
-		}
+        @Override
+        public OfInt trySplit() {
+            // TODO Auto-generated method stub
+            return null;
+        }
 
-		@Override
-		public Comparator<? super Integer> getComparator() {
-			return Integer::compare;
-		}
-	}
+        @Override
+        public boolean tryAdvance(IntConsumer action) {
+            if (intIterator.hasNext()) {
+                action.accept(intIterator.next());
+                return true;
+            } else {
+                return false;
+            }
+        }
 
-	private final RoNamespace namespace;
-	private final String prefix;
-	private final int minLength;
-	private final int maxLength;
-	private final ImmutableRoaringBitmap bitmap;
-	private final RoIriDictionary roIriDictionary;
+        @Override
+        public Comparator<? super Integer> getComparator() {
+            return Integer::compare;
+        }
+    }
 
-	protected RoIriPrefixFollowedByNumberDictionary(File infoFile,
-			File bitmapFile, RoNamespace namespace,
-			RoIriDictionary roIriDictionary) throws IOException {
+    private final RoNamespace namespace;
+    private final String prefix;
+    private final int minLength;
+    private final int maxLength;
+    private final ImmutableRoaringBitmap bitmap;
+    private final RoIriDictionary roIriDictionary;
 
-		this.namespace = namespace;
-		this.roIriDictionary = roIriDictionary;
+    protected RoIriPrefixFollowedByNumberDictionary(File infoFile,
+            File bitmapFile, RoNamespace namespace,
+            RoIriDictionary roIriDictionary) throws IOException {
 
-		List<String> info = Files.readAllLines(infoFile.toPath());
-		int prefixLength = Integer.parseInt(info.get(0));
-		int i = 1;
-		String tempprefix = info.get(i);
-		while (i < info.size() && tempprefix.length() < prefixLength) {
-			tempprefix += info.get(++i);
-		}
-		prefix = tempprefix;
-		minLength = Integer.parseInt(info.get(++i));
-		maxLength = Integer.parseInt(info.get(++i));
-		assert minLength == maxLength;
-		try (final RandomAccessFile ad = new RandomAccessFile(bitmapFile,
-				"r")) {
-			final MappedByteBuffer bb = ad.getChannel().map(MapMode.READ_ONLY,
-					0, ad.length());
-			bitmap = new ImmutableRoaringBitmap(bb);
-		}
-	}
+        this.namespace = namespace;
+        this.roIriDictionary = roIriDictionary;
 
-	@Override
-	public Optional<String> getLocalNameFromId(long id) throws IOException {
+        List<String> info = Files.readAllLines(infoFile.toPath());
+        int prefixLength = Integer.parseInt(info.get(0));
+        int i = 1;
+        String tempprefix = info.get(i);
+        while (i < info.size() && tempprefix.length() < prefixLength) {
+            tempprefix += info.get(++i);
+        }
+        prefix = tempprefix;
+        minLength = Integer.parseInt(info.get(++i));
+        maxLength = Integer.parseInt(info.get(++i));
+        assert minLength == maxLength;
+        try (final RandomAccessFile ad = new RandomAccessFile(bitmapFile,
+                "r")) {
+            final MappedByteBuffer bb = ad.getChannel().map(MapMode.READ_ONLY,
+                    0, ad.length());
+            bitmap = new ImmutableRoaringBitmap(bb);
+        }
+    }
 
-		if (bitmap.contains((int) id)) {
-			String value = Integer.toString((int) id);
-			String padding;
-			if (value.length() + prefix.length() == minLength)
-				padding = "";
-			else {
-				int pl = minLength - (value.length() + prefix.length());
-				char[] pa = new char[pl];
-				Arrays.fill(pa, '0');
-				padding = new String(pa);
-			}
-			return Optional.of(prefix + padding + value);
-		} else
-			return Optional.empty();
-	}
+    @Override
+    public Optional<String> getLocalNameFromId(long id) throws IOException {
+        final int idWithoutNamespaceId = (int) id;
 
-	@Override
-	public String getNamespace() {
-		return namespace.getName();
-	}
+        if (bitmap.contains(idWithoutNamespaceId)) {
+            String value = Integer.toString(idWithoutNamespaceId);
+            String padding;
+            if (value.length() + prefix.length() == minLength) {
+                padding = "";
+            } else {
+                int pl = minLength - (value.length() + prefix.length());
+                char[] pa = new char[pl];
+                Arrays.fill(pa, '0');
+                padding = new String(pa);
+            }
+            return Optional.of(prefix + padding + value);
+        } else {
+            return Optional.empty();
+        }
+    }
 
-	@Override
-	public int getNamespaceId() {
-		return namespace.getId();
-	}
+    @Override
+    public String getNamespace() {
+        return namespace.getName();
+    }
 
-	@Override
-	public Optional<RoIri> find(IRI predicate) {
-		if (predicate.getNamespace().equals(namespace)) {
-			if (predicate.getLocalName().startsWith(prefix)) {
-				try {
-					int id = Integer.valueOf(predicate.getLocalName()
-							.substring(prefix.length()));
-					if (bitmap.contains(id)) {
-						return Optional.of(
-								new RoIri(nameSpacedId(id), roIriDictionary));
-					}
-				} catch (NumberFormatException e) {
-					return Optional.empty();
-				}
-			}
-		}
-		return Optional.empty();
-	}
+    @Override
+    public int getNamespaceId() {
+        return (int) namespace.getId();
+    }
 
-	private long nameSpacedId(int id) {
-		return id | (namespace.getId() << 32);
-	}
+    @Override
+    public Optional<RoIri> find(IRI predicate) {
+        if (predicate.getNamespace().equals(namespace.getName())) {
+            if (predicate.getLocalName().startsWith(prefix)) {
+                try {
+                    int id = Integer.valueOf(predicate.getLocalName()
+                            .substring(prefix.length()));
+                    if (bitmap.contains(id)) {
+                        return Optional.of(
+                                new RoIri(nameSpacedId(id), roIriDictionary));
+                    }
+                } catch (NumberFormatException e) {
+                    return Optional.empty();
+                }
+            }
+        }
+        return Optional.empty();
+    }
 
-	@Override
-	public Stream<IRI> values() {
-		return StreamSupport.intStream(new OfIntImplementation(), false)
-				.mapToLong(this::nameSpacedId)
-				.mapToObj(id -> new RoIri(id, roIriDictionary));
-	}
+    private long nameSpacedId(long id) {
+        return id | (namespace.getId() << 32);
+    }
+
+    @Override
+    public Stream<IRI> values() {
+        return StreamSupport.intStream(new OfIntImplementation(), false)
+                .mapToLong(this::nameSpacedId)
+                .mapToObj(id -> new RoIri(id, roIriDictionary));
+    }
 }

@@ -27,7 +27,7 @@ public class BnodeIntegerLiteralList extends RoResourceRoValueList {
 			Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
 			RoIriDictionary iriDictionary) throws IOException {
 		super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-				iriDictionary);
+				iriDictionary,null);
 	}
 
 	@Override
@@ -38,7 +38,7 @@ public class BnodeIntegerLiteralList extends RoResourceRoValueList {
 	public static class Builder extends AbstractBuilder {
 		public Builder(File file, RoIri predicate, RoNamespaces roNamespaces,
 				RoIriDictionary iriDictionary) throws IOException {
-			super(file, predicate, roNamespaces, iriDictionary);
+			super(file, predicate, roNamespaces, iriDictionary,null);
 		}
 
 		public BnodeIntegerLiteralList build() throws IOException {

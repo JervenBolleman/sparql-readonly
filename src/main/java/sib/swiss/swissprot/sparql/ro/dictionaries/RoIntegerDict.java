@@ -2,24 +2,16 @@ package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
 import java.math.BigInteger;
-import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentImpl;
-import org.apache.orc.IntegerColumnStatistics;
 import org.apache.orc.Reader;
 import org.apache.orc.RecordReader;
-import org.apache.orc.StripeStatistics;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.impl.RecordReaderImpl;
-import org.apache.orc.impl.TreeReaderFactory;
 
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
