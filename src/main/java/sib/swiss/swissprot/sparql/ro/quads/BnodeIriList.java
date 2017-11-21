@@ -12,6 +12,7 @@ import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -22,9 +23,9 @@ public class BnodeIriList extends RoResourceRoValueList {
     public BnodeIriList(File file, RoIri predicate,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
             Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces namespaces,
-            RoIriDictionary iriDictionary) throws IOException {
+            RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary) throws IOException {
         super(file, predicate, iriGraphsMap, bNodeGraphsMap, namespaces,
-                iriDictionary, null);
+                iriDictionary, null, bnodeDictionary);
     }
 
     public BnodeIriList(File file, RoIri predicate)
@@ -35,16 +36,14 @@ public class BnodeIriList extends RoResourceRoValueList {
     public static class Builder extends AbstractBuilder {
 
         public Builder(File file, RoIri predicate, RoNamespaces namesapces,
-                RoIriDictionary dict) throws IOException {
-            super(file, predicate, namesapces, dict, null);
+                RoIriDictionary dict, RoBnodeDictionary bnodeDictionary) throws IOException {
+            super(file, predicate, namesapces, dict, null,bnodeDictionary);
         }
 
         public BnodeIriList build() throws IOException {
-            das.close();
-            saveContextBitmaps();
-            saveNamespace(namespaces, file);
-            return new BnodeIriList(file, predicate, bNodeGraphsMap,
-                    iriGraphsMap, namespaces, iriDictionary);
+            save();
+            return new BnodeIriList(file, predicate, bnodeGraphsMap,
+                    iriGraphsMap, namespaces, iriDictionary,bnodeDictionary);
         }
     }
 

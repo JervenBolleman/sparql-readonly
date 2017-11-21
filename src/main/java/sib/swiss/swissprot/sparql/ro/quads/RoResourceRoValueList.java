@@ -16,8 +16,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -27,6 +25,7 @@ import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
@@ -45,6 +44,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
     protected final RoNamespaces namespaces;
     protected final RoIriDictionary iriDictionary;
     protected final RoLiteralDict literalDict;
+    protected final RoBnodeDictionary bNodeDict;
 
     protected static long triplesInFile(File file) {
         return file.length() / (Long.BYTES * 2);
@@ -53,7 +53,9 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
     protected RoResourceRoValueList(File file, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap, RoNamespaces namespaces,
-            RoIriDictionary dictionary, RoLiteralDict literalDict) throws IOException {
+            RoIriDictionary dictionary,
+            RoLiteralDict literalDict,
+            RoBnodeDictionary bNodeDict) throws IOException {
         super();
         this.predicate = predicate;
         this.iriGraphsMap = iriGraphsMap;
@@ -64,12 +66,17 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
                 .openLongBuffer(file.toPath());
         this.numberOfTriplesInList = triplesInFile(file);
         this.literalDict = literalDict;
-
+        this.bNodeDict = bNodeDict;
     }
 
     public RoResourceRoValueList(File file, RoIri predicate)
             throws FileNotFoundException, IOException {
-        this(file, predicate, getNamespaces(file), getRoIriDicts(file), getRoLiteralDicts(file));
+        this(file, predicate, getNamespaces(file), getRoIriDicts(file), getRoLiteralDicts(file), getRoBnodeDictionary(file));
+    }
+
+    private static RoBnodeDictionary getRoBnodeDictionary(File file) {
+        // TODO Auto-generated method stub
+        return null;
     }
 
     private static RoIriDictionary getRoIriDicts(File file) {
@@ -83,10 +90,10 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
     }
 
     public RoResourceRoValueList(File file, RoIri predicate,
-            RoNamespaces roNamespaces, RoIriDictionary dict, RoLiteralDict literalDict1)
+            RoNamespaces roNamespaces, RoIriDictionary dict, RoLiteralDict literalDict, RoBnodeDictionary bdnodeDictionary)
             throws FileNotFoundException, IOException {
         this(file, predicate, getIriGraphsMap(file, dict),
-                getRoBnodeGraphsMap(file, roNamespaces), roNamespaces, dict, literalDict1);
+                getRoBnodeGraphsMap(file, roNamespaces), roNamespaces, dict, literalDict, bdnodeDictionary);
     }
 
     private static RoNamespaces getNamespaces(File file)
@@ -194,7 +201,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         }
         return null;
     }
-    
+
     public Stream<Statement> stream() {
         return StreamSupport.stream(spliterator(), false);
     }
@@ -206,13 +213,14 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         protected final RoIriDictionary iriDictionary;
         protected final RoLiteralDict literalDictionary;
         protected final Map<RoIri, RoaringBitmap> iriGraphsMap = new HashMap<>();
-        protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap = new HashMap<>();
+        protected final Map<RoBnode, RoaringBitmap> bnodeGraphsMap = new HashMap<>();
         protected final DataOutputStream das;
         protected long numberOfTriplesInList;
         protected final RoNamespaces namespaces;
+        protected final RoBnodeDictionary bnodeDictionary;
 
         protected AbstractBuilder(File file, RoIri predicate,
-                RoNamespaces namespaces, RoIriDictionary iriDictionary, RoLiteralDict literalDictionary)
+                RoNamespaces namespaces, RoIriDictionary iriDictionary, RoLiteralDict literalDictionary, RoBnodeDictionary bnodeDictionary)
                 throws FileNotFoundException {
             super();
             this.file = file;
@@ -222,6 +230,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
             this.literalDictionary = literalDictionary;
             das = new DataOutputStream(new FileOutputStream(file, true));
             numberOfTriplesInList = triplesInFile(file);
+            this.bnodeDictionary = bnodeDictionary;
         }
 
         protected RoaringBitmap bitmapForContext(final RoResource context) {
@@ -282,7 +291,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         protected void saveContextBitmaps()
                 throws FileNotFoundException, IOException {
             writeMapToDisk(getIriGraphsFile(file), iriGraphsMap);
-            writeMapToDisk(getBnodeGraphsFile(file), bNodeGraphsMap);
+            writeMapToDisk(getBnodeGraphsFile(file), bnodeGraphsMap);
         }
 
         private void writeMapToDisk(File graphs,
@@ -303,12 +312,18 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         }
 
         private RoaringBitmap bitmapForContext(final RoBnode context) {
-            RoaringBitmap filter = bNodeGraphsMap.get(context);
+            RoaringBitmap filter = bnodeGraphsMap.get(context);
             if (filter == null) {
                 filter = new RoaringBitmap();
-                bNodeGraphsMap.put(context, filter);
+                bnodeGraphsMap.put(context, filter);
             }
             return filter;
+        }
+
+        protected void save() throws IOException {
+            das.close();
+            saveContextBitmaps();
+            saveNamespace(namespaces, file);
         }
     }
 
@@ -331,7 +346,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
 
         @Override
         public boolean hasNext() {
-            return at < numberOfTriplesInList;
+            return at < numberOfTriplesInList * 2;
         }
 
         protected abstract S getSubjectFromLong(long id);

@@ -80,7 +80,7 @@ public class PredicateListBuildingHandler implements RDFHandler {
             Builder builder = builders.get(predicate);
             if (builder == null) {
                 builder = new RoPredicateStore.Builder(RoPredicateStore.initDirectory(predicateListsDir, predicate),
-                        predicate, literalDict, roNamespaces, iriDict);
+                        predicate, literalDict, roNamespaces, iriDict, bnodeDict);
                 builders.put(predicate, builder);
             }
             RoResource subject = find(st.getSubject()).get();

@@ -4,21 +4,17 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.text.Collator;
-import java.util.List;
 import java.util.Locale;
 import java.nio.file.Files;
 
 import org.eclipse.rdf4j.model.BNode;
 
-import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
 import java.io.BufferedReader;
 import java.util.Iterator;
-import java.util.stream.Stream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;

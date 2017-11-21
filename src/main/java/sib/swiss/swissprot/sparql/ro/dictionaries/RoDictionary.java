@@ -16,7 +16,7 @@ import org.eclipse.rdf4j.model.Value;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
 abstract class RoDictionary<T extends RoValue, V extends Value> {
-    protected static final long SECOND_BYTE_TRUE = 1L << 63;
+    public static final long SECOND_BYTE_TRUE = 1L << 63;
     protected final Reader reader;
     protected final TypeDescription schema;
 

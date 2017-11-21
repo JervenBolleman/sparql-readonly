@@ -49,4 +49,13 @@ public class RoIri implements IRI, RoResource {
     public long getLongId() {
         return id;
     }
+
+    @Override
+    public boolean equals(Object object) {
+        if (object instanceof RoIri) {
+            return id == ((RoIri) object).id;
+        } else {
+            return super.equals(object);
+        }
+    }
 }

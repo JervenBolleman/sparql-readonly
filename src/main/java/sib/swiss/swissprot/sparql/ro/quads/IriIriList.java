@@ -14,7 +14,6 @@ import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
@@ -27,7 +26,7 @@ public class IriIriList extends RoResourceRoValueList
             Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
             RoIriDictionary iriDictionary) throws IOException {
         super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, null);
+                iriDictionary, null, null);
 
     }
 
@@ -46,16 +45,15 @@ public class IriIriList extends RoResourceRoValueList
         public Builder(File file, RoIri predicate,
                 RoIriDictionary iriDictionary, RoNamespaces namespaces)
                 throws IOException {
-            super(file, predicate, namespaces, iriDictionary, null);
+            super(file, predicate, namespaces, iriDictionary, null, null);
         }
 
         public IriIriList build() throws IOException {
-            das.close();
-            saveContextBitmaps();
-            saveNamespace(namespaces, file);
-            return new IriIriList(file, predicate, bNodeGraphsMap, iriGraphsMap,
+            save();
+            return new IriIriList(file, predicate, bnodeGraphsMap, iriGraphsMap,
                     namespaces, iriDictionary);
         }
+
     }
 
     private class IriIriListIterator implements Iterator<Statement> {
@@ -64,7 +62,7 @@ public class IriIriList extends RoResourceRoValueList
 
         @Override
         public boolean hasNext() {
-            return at < numberOfTriplesInList;
+            return at < (numberOfTriplesInList * 2);
         }
 
         @Override
@@ -79,12 +77,11 @@ public class IriIriList extends RoResourceRoValueList
                 return new RoContextStatement(
                         new RoIri(subjectId, iriDictionary), predicate,
                         new RoIri(objectId, iriDictionary), graph);
-            } else if (graph instanceof RoIri){
+            } else if (graph instanceof RoIri) {
                 return new OnlyRoIriContextStatement(subjectId,
                         predicate.getLongId(), objectId, graph.getLongId(),
                         iriDictionary);
-            } else
-            {
+            } else {
                 return new OnlyRoIriStatement(subjectId, predicate.getLongId(), objectId, iriDictionary);
             }
         }

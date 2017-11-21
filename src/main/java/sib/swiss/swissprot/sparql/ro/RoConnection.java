@@ -89,7 +89,7 @@ public class RoConnection implements SailConnection {
     @Override
     public CloseableIteration<? extends Resource, SailException> getContextIDs()
             throws SailException {
-        return new EmptyIteration<Resource, SailException>();
+        return new EmptyIteration<>();
     }
 
     @Override

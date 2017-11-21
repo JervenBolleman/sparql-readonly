@@ -3,8 +3,10 @@ package sib.swiss.swissprot.sparql.ro;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
+import java.util.stream.Stream;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.model.IRI;
@@ -27,12 +29,34 @@ public class RoFilteredTripleIterator implements
             } catch (IOException e) {
                 throw new QueryEvaluationException(e);
             }
-        } else {
+        } else if (contexts == null || contexts.length == 0) {
+            Set<RoPredicateStore> st = store.getPredicateStores()
+                    .values()
+                    .stream()
+                    .collect(Collectors.toSet());
+
+            predicateStores = st.stream()
+                    .flatMap(RoPredicateStore::stream)
+                    .filter(s -> s.getContext() == null)
+                    .iterator();
+        } else if (contexts.length == 1) {
+
             predicateStores = store.getPredicateStores()
                     .values()
                     .stream()
-                    .map(RoPredicateStore::spliterator)
-                    .flatMap(s -> StreamSupport.stream(s, true))
+                    .flatMap(RoPredicateStore::stream)
+                    .filter(s -> contexts[0].equals(s.getContext()))
+                    .iterator();
+        } else {
+            Set<Resource> collect = Arrays.stream(contexts)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            predicateStores = store.getPredicateStores()
+                    .values()
+                    .stream()
+                    .flatMap(RoPredicateStore::stream)
+                    .filter(s -> s.getContext() != null)
+                    .filter(s -> collect.contains(s.getContext()))
                     .iterator();
         }
     }

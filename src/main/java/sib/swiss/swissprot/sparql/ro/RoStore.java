@@ -25,10 +25,12 @@ import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.helpers.AbstractSail;
 
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary;
+import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIntegerDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
 
@@ -37,12 +39,13 @@ public class RoStore extends AbstractSail {
     private RoValueFactory vf;
     private final FederatedServiceResolver federatedServiceResolver;
     private RoNamespaces namespaces;
-    private Map<IRI, RoPredicateStore> stores = new HashMap<>();
+    private final Map<IRI, RoPredicateStore> stores = new HashMap<>();
     private final Map<RoDirectories, File> subDataDirs = new EnumMap<>(
             RoDirectories.class);
     private RoIriDictionary iriDict;
     private RoBnodeDictionary bnodeDict;
     private RoLiteralDict literalDict;
+    private RoIntegerDict integerDict;
     private final Configuration conf;
 
     public RoStore() {
@@ -114,6 +117,17 @@ public class RoStore extends AbstractSail {
         Path literals = new Path(literalsDir.getAbsolutePath(), RoLiteralDict.PATH_NAME);
         literalDict = new RoLiteralDict(OrcFile.createReader(literals, OrcFile.readerOptions(conf)));
 
+        final File integerDir = subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES);
+        if (!integerDir.exists()) {
+            integerDir.mkdir();
+        }
+        File integerFile = new File(integerDir, RoIntegerDict.PATH_NAME);
+        if (!integerFile.exists()) {
+            integerFile.createNewFile();
+        }
+        Path integer = new Path(integerDir.getAbsolutePath(), RoIntegerDict.PATH_NAME);
+        integerDict = new RoIntegerDict(OrcFile.createReader(integer, OrcFile.readerOptions(conf)));
+
         File bnodesDir = subDataDirs.get(RoDirectories.BNODE_DICTIONARIES);
         if (!bnodesDir.exists()) {
             bnodesDir.mkdir();
@@ -145,7 +159,8 @@ public class RoStore extends AbstractSail {
                 subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES));
         final TempIriDictionary tempIriDictionary = new TempIriDictionary(
                 subDataDirs.get(RoDirectories.IRI_DICTIONARIES));
-
+        final TempIntegerDictionary tempIntegerDictionary = new TempIntegerDictionary(
+                subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES));
         for (File file : files) {
             final Optional<RDFFormat> op = Rio
                     .getParserFormatForFileName(file.getName());
@@ -155,13 +170,14 @@ public class RoStore extends AbstractSail {
 
                 parser.setRDFHandler(
                         new DictionaryBuildingHandler(this, tempBNodeDictionary,
-                                tempIriDictionary, tempLitalDictionary));
+                                tempIriDictionary, tempLitalDictionary, tempIntegerDictionary));
                 parser.parse(new FileReader(file), "");
             }
         }
         bnodeDict = tempBNodeDictionary.load();
         iriDict = tempIriDictionary.load();
         literalDict = tempLitalDictionary.load();
+        integerDict = tempIntegerDictionary.load();
         for (File file : files) {
             final Optional<RDFFormat> op = Rio
                     .getParserFormatForFileName(file.getName());
@@ -181,6 +197,7 @@ public class RoStore extends AbstractSail {
 
     private void reinitPredicateStores()
             throws FileNotFoundException, IOException {
+        stores.clear();
         for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
                 .listFiles()) {
             final RoPredicateStore roPredicateStore = new RoPredicateStore(
@@ -193,7 +210,7 @@ public class RoStore extends AbstractSail {
     public RoPredicateStore getPredicateStore(IRI predicate)
             throws FileNotFoundException, IOException {
         RoPredicateStore store = stores.get(predicate);
-        if (predicate == null) {
+        if (store == null) {
             store = new RoPredicateStore(RoPredicateStore.initDirectory(
                     subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate),
                     iriDict);

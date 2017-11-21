@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
 
+import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 
@@ -18,19 +19,26 @@ import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
-public class IriBnodeList extends RoResourceRoValueList {
+public class BnodeBooleanList extends RoResourceRoValueList
+        implements Iterable<Statement> {
 
-    public IriBnodeList(File file, RoIri predicate,
+    public BnodeBooleanList(File file, RoIri predicate,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces namespaces,
-            RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, namespaces,
-                iriDictionary,null,bnodeDictionary);
+            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
+            RoIriDictionary iriDictionary, RoBnodeDictionary bNodeDictionary) throws IOException {
+        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
+                iriDictionary, null, bNodeDictionary);
+
     }
 
-    public IriBnodeList(File file, RoIri predicate)
+    public BnodeBooleanList(File file, RoIri predicate)
             throws FileNotFoundException, IOException {
         super(file, predicate);
+    }
+
+    @Override
+    public Iterator<Statement> iterator() {
+        return new BnodeBooleanListIterator();
     }
 
     public static class Builder extends AbstractBuilder {
@@ -41,14 +49,14 @@ public class IriBnodeList extends RoResourceRoValueList {
             super(file, predicate, namespaces, iriDictionary, null, bnodeDictionary);
         }
 
-        public IriBnodeList build() throws IOException {
+        public BnodeBooleanList build() throws IOException {
             save();
-            return new IriBnodeList(file, predicate, bnodeGraphsMap,
-                    iriGraphsMap, namespaces, iriDictionary, bnodeDictionary);
+            return new BnodeBooleanList(file, predicate, bnodeGraphsMap, iriGraphsMap,
+                    namespaces, iriDictionary, bnodeDictionary);
         }
     }
 
-    private class IriBnodeListIterator implements Iterator<Statement> {
+    private class BnodeBooleanListIterator implements Iterator<Statement> {
 
         private int at = 0;
 
@@ -60,19 +68,22 @@ public class IriBnodeList extends RoResourceRoValueList {
         @Override
         public Statement next() {
             final RoResource graph = findGraphForTriple(at);
-            long subjectId = getLongAtIndexInLongBuffers(at, triples);
+            long subjectId = getLongAtIndexInLongBuffers(at++, triples); // increment
+            // after
+            // use
             long objectId = getLongAtIndexInLongBuffers(at++, triples);
-            at++;
-            return new RoContextStatement(new RoIri(subjectId, iriDictionary),
-                    predicate, new RoBnode(objectId), graph);
 
+            if (graph instanceof BNode) {
+                return new RoContextStatement(
+                        new RoBnode(subjectId, bNodeDict), predicate,
+                        new RoIri(objectId, iriDictionary), graph);
+            } else {
+                return new OnlyRoIriContextStatement(subjectId,
+                        predicate.getLongId(), objectId, graph.getLongId(),
+                        iriDictionary);
+            }
         }
 
-    }
-
-    @Override
-    public Iterator<Statement> iterator() {
-        return new IriBnodeListIterator();
     }
 
 }

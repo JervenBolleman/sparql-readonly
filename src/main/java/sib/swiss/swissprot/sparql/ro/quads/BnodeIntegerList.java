@@ -1,8 +1,7 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLongAtIndexInLongBuffers;
-
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
@@ -14,12 +13,17 @@ import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
+import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
-import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
-public class BnodeBnodeList extends RoResourceRoValueList {
+public class BnodeIntegerList extends RoResourceRoValueList {
 
-    public BnodeBnodeList(File file, RoIri predicate,
+    public BnodeIntegerList(File file, RoIri predicate)
+            throws FileNotFoundException, IOException {
+        super(file, predicate);
+    }
+
+    public BnodeIntegerList(File file, RoIri predicate,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
             Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
             RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary) throws IOException {
@@ -27,8 +31,9 @@ public class BnodeBnodeList extends RoResourceRoValueList {
                 iriDictionary, null, bnodeDictionary);
     }
 
-    public BnodeBnodeList(File file, RoIri predicate) throws IOException {
-        super(file, predicate);
+    @Override
+    public Iterator<Statement> iterator() {
+        return new BnodeIntegerListIterator();
     }
 
     public static class Builder extends AbstractBuilder {
@@ -38,38 +43,25 @@ public class BnodeBnodeList extends RoResourceRoValueList {
             super(file, predicate, roNamespaces, iriDictionary, null, bnodeDictionary);
         }
 
-        public BnodeBnodeList build() throws IOException {
+        public BnodeIntegerList build() throws IOException {
             save();
-            return new BnodeBnodeList(file, predicate, bnodeGraphsMap,
+            return new BnodeIntegerList(file, predicate, bnodeGraphsMap,
                     iriGraphsMap, namespaces, iriDictionary, bnodeDictionary);
         }
     }
 
-    private class BnodeBnodeListIterator implements Iterator<Statement> {
-
-        private int at = 0;
+    private class BnodeIntegerListIterator
+            extends ResourceValueListIterator<RoBnode, RoIntegerLiteral> {
 
         @Override
-        public boolean hasNext() {
-            return at < numberOfTriplesInList;
+        protected RoBnode getSubjectFromLong(long id) {
+            return new RoBnode(id);
         }
 
         @Override
-        public Statement next() {
-            final RoResource graph = findGraphForTriple(at);
-            long subjectId = getLongAtIndexInLongBuffers(at, triples);
-            long objectId = getLongAtIndexInLongBuffers(at++, triples);
-            at++;
-            return new RoContextStatement(new RoBnode(subjectId), predicate,
-                    new RoBnode(objectId), graph);
-
+        protected RoIntegerLiteral getObjectFromLong(long id) {
+            return new RoIntegerLiteral(id);
         }
-
-    }
-
-    @Override
-    public Iterator<Statement> iterator() {
-        return new BnodeBnodeListIterator();
     }
 
 }

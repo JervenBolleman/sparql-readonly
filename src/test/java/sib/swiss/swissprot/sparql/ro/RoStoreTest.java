@@ -66,6 +66,6 @@ public class RoStoreTest {
 		store.load(file);
 		assertNotNull(store);
 
-                assertEquals(2, store.getConnection().size());
+                assertEquals(3, store.getConnection().size());
 	}
 }

@@ -33,7 +33,7 @@ public class IriLiteralList extends RoResourceRoValueList {
             Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
             RoIriDictionary iriDictionary, RoLiteralDict literalDictionary) throws IOException {
         super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, literalDictionary);
+                iriDictionary, literalDictionary, null);
 
     }
 
@@ -47,14 +47,12 @@ public class IriLiteralList extends RoResourceRoValueList {
         public Builder(File file, RoIri predicate,
                 RoIriDictionary iriDictionary, RoNamespaces namespaces, RoLiteralDict literalDict)
                 throws IOException {
-            super(file, predicate, namespaces, iriDictionary, literalDict);
+            super(file, predicate, namespaces, iriDictionary, literalDict, null);
         }
 
         public IriLiteralList build() throws IOException {
-            das.close();
-            saveContextBitmaps();
-            saveNamespace(namespaces, file);
-            return new IriLiteralList(file, predicate, bNodeGraphsMap,
+            save();
+            return new IriLiteralList(file, predicate, bnodeGraphsMap,
                     iriGraphsMap, namespaces, iriDictionary, literalDictionary);
         }
     }

@@ -12,10 +12,10 @@ import sib.swiss.swissprot.sparql.ro.values.RoValue;
 public class RoContextStatement implements Statement {
 
 	private static final long serialVersionUID = 1L;
-	private RoResource subject;
-	private RoIri predicate;
-	private RoValue object;
-	private RoResource context;
+	private final RoResource subject;
+	private final RoIri predicate;
+	private final RoValue object;
+	private final RoResource context;
 
 	public RoContextStatement(RoResource subject, RoIri predicate,
 			RoValue object, RoResource context) {

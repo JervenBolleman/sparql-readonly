@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -23,6 +24,7 @@ public class RoIntegerDict
         extends RoDictionary<RoIntegerLiteral, IntegerLiteral> {
 
     public static final String INT_LONG_VALUE = "int_long_value";
+    public static final String PATH_NAME = "integer_dict";
 
     public RoIntegerDict(Reader reader) {
         super(reader);
@@ -36,8 +38,8 @@ public class RoIntegerDict
             VectorizedRowBatch batch = schema.createRowBatch(1);
             final boolean nextBatch = rows.nextBatch(batch);
             assert nextBatch;
-            LongColumnVector longVector = (LongColumnVector) batch.cols[0];
-            return new RoBigIntegerLiteral(id, BigInteger.valueOf(longVector.vector[0]));
+            DecimalColumnVector longVector = (DecimalColumnVector) batch.cols[0];
+            return new RoBigIntegerLiteral(id, longVector.vector[0].getHiveDecimal().bigDecimalValue().toBigInteger());
         } else {
             return new RoIntegerLiteral(id);
         }

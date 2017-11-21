@@ -10,6 +10,7 @@ import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
@@ -18,56 +19,50 @@ import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 
 public class BnodeStringLiteralList extends RoResourceRoValueList {
 
-	private final RoLiteralDict dict;
+    public BnodeStringLiteralList(File file, RoIri predicate) throws FileNotFoundException, IOException {
+        super(file, predicate);
+    }
 
-	public BnodeStringLiteralList(File file, RoIri predicate,
-			RoLiteralDict dict) throws FileNotFoundException, IOException {
-		super(file, predicate);
-		this.dict = dict;
-	}
+    public BnodeStringLiteralList(File file, RoIri predicate,
+            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
+            Map<RoIri, RoaringBitmap> iriGraphsMap, RoLiteralDict dict,
+            RoNamespaces roNamespaces, RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary)
+            throws IOException {
+        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
+                iriDictionary, dict, bnodeDictionary);
+    }
 
-	public BnodeStringLiteralList(File file, RoIri predicate,
-			Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-			Map<RoIri, RoaringBitmap> iriGraphsMap, RoLiteralDict dict,
-			RoNamespaces roNamespaces, RoIriDictionary iriDictionary)
-			throws IOException {
-		super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-				iriDictionary,null);
-		this.dict = dict;
-	}
+    @Override
+    public Iterator<Statement> iterator() {
+        return new BnodeStringListIterator();
+    }
 
-	@Override
-	public Iterator<Statement> iterator() {
-		return new BnodeStringListIterator();
-	}
+    public static class Builder extends AbstractBuilder {
 
-	public static class Builder extends AbstractBuilder {
+        public Builder(File file, RoIri predicate, RoLiteralDict literalDictionary,
+                RoNamespaces roNamespaces, RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary)
+                throws IOException {
+            super(file, predicate, roNamespaces, iriDictionary, literalDictionary, bnodeDictionary);
+        }
 
-		public Builder(File file, RoIri predicate, RoLiteralDict dict,
-				RoNamespaces roNamespaces, RoIriDictionary iriDictionary)
-				throws IOException {
-			super(file, predicate, roNamespaces, iriDictionary, dict);
-		}
+        public BnodeStringLiteralList build() throws IOException {
+            save();
+            return new BnodeStringLiteralList(file, predicate, bnodeGraphsMap,
+                    iriGraphsMap, literalDictionary, namespaces, iriDictionary, bnodeDictionary);
+        }
+    }
 
-		public BnodeStringLiteralList build() throws IOException {
-			das.close();
-			saveContextBitmaps();
-			return new BnodeStringLiteralList(file, predicate, bNodeGraphsMap,
-					iriGraphsMap, literalDictionary, namespaces, iriDictionary);
-		}
-	}
+    private class BnodeStringListIterator
+            extends ResourceValueListIterator<RoBnode, RoLiteral> {
 
-	private class BnodeStringListIterator
-			extends ResourceValueListIterator<RoBnode, RoLiteral> {
+        @Override
+        protected RoBnode getSubjectFromLong(long id) {
+            return new RoBnode(id, bNodeDict);
+        }
 
-		@Override
-		protected RoBnode getSubjectFromLong(long id) {
-			return new RoBnode(id);
-		}
-
-		@Override
-		protected RoLiteral getObjectFromLong(long id) {
-			return dict.get(id);
-		}
-	}
+        @Override
+        protected RoLiteral getObjectFromLong(long id) {
+            return literalDict.get(id);
+        }
+    }
 }

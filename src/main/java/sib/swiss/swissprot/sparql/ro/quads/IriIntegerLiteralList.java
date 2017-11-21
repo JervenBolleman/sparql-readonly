@@ -20,56 +20,56 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 public class IriIntegerLiteralList extends RoResourceRoValueList {
 
-	public IriIntegerLiteralList(File file, RoIri predicate)
-			throws FileNotFoundException, IOException {
-		super(file, predicate);
-	}
+    public IriIntegerLiteralList(File file, RoIri predicate)
+            throws FileNotFoundException, IOException {
+        super(file, predicate);
+    }
 
-	public IriIntegerLiteralList(File file, RoIri predicate,
-			Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-			Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
-			RoIriDictionary iriDictionary) throws IOException {
-		super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-				iriDictionary, null);
-	}
+    public IriIntegerLiteralList(File file, RoIri predicate,
+            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
+            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
+            RoIriDictionary iriDictionary) throws IOException {
+        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
+                iriDictionary, null, null);
+    }
 
-	@Override
-	public Iterator<Statement> iterator() {
-		return new IriIntegerListIterator();
-	}
+    @Override
+    public Iterator<Statement> iterator() {
+        return new IriIntegerListIterator();
+    }
 
-	public static class Builder extends AbstractBuilder {
-		public Builder(File file, RoIri predicate,
-				RoIriDictionary iriDictionary, RoNamespaces namespaces)
-				throws IOException {
-			super(file, predicate, namespaces, iriDictionary,null);
-		}
+    public static class Builder extends AbstractBuilder {
 
-		public IriIntegerLiteralList build() throws IOException {
-			das.close();
-			saveContextBitmaps();
-                        saveNamespace(namespaces, file);
-			return new IriIntegerLiteralList(file, predicate, bNodeGraphsMap,
-					iriGraphsMap, namespaces, iriDictionary);
-		}
-	}
+        public Builder(File file, RoIri predicate,
+                RoIriDictionary iriDictionary, RoNamespaces namespaces)
+                throws IOException {
+            super(file, predicate, namespaces, iriDictionary, null, null);
+        }
 
-	private class IriIntegerListIterator implements Iterator<Statement> {
-		private int at = 0;
+        public IriIntegerLiteralList build() throws IOException {
+            save();
+            return new IriIntegerLiteralList(file, predicate, bnodeGraphsMap,
+                    iriGraphsMap, namespaces, iriDictionary);
+        }
+    }
 
-		@Override
-		public boolean hasNext() {
-			return at < numberOfTriplesInList;
-		}
+    private class IriIntegerListIterator implements Iterator<Statement> {
 
-		@Override
-		public Statement next() {
-			final RoResource graph = findGraphForTriple(at);
-			long subjectId = getLongAtIndexInLongBuffers(at++, triples);
-			long objectId = getLongAtIndexInLongBuffers(at++, triples);
-			return new RoContextStatement(new RoIri(subjectId, iriDictionary),
-					predicate, new RoIntegerLiteral(objectId), graph);
+        private int at = 0;
 
-		}
-	}
+        @Override
+        public boolean hasNext() {
+            return at < numberOfTriplesInList;
+        }
+
+        @Override
+        public Statement next() {
+            final RoResource graph = findGraphForTriple(at);
+            long subjectId = getLongAtIndexInLongBuffers(at++, triples);
+            long objectId = getLongAtIndexInLongBuffers(at++, triples);
+            return new RoContextStatement(new RoIri(subjectId, iriDictionary),
+                    predicate, new RoIntegerLiteral(objectId), graph);
+
+        }
+    }
 }
