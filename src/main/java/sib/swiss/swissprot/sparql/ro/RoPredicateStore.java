@@ -184,7 +184,7 @@ public class RoPredicateStore implements Iterable<Statement> {
                     new File(directory, FILE_TO_STORE_BNODE_STRING), predicate,
                     literalDict, namespaces, iriDictionary, bnodeDictionary);
             this.bNodeBooleanBuilder = new BnodeBooleanList.Builder(new File(directory, FILE_TO_STORE_BNODE_BOOLEAN), predicate,
-                     iriDictionary, namespaces, bnodeDictionary);
+                    iriDictionary, namespaces, bnodeDictionary);
             this.iriBooleanBuilder = new IriBooleanList.Builder(
                     new File(directory, FILE_TO_STORE_IRI_BOOLEAN), predicate,
                     iriDictionary, namespaces);

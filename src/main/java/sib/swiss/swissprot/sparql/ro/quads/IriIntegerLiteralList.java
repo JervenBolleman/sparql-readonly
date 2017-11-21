@@ -59,7 +59,7 @@ public class IriIntegerLiteralList extends RoResourceRoValueList {
 
         @Override
         public boolean hasNext() {
-            return at < numberOfTriplesInList;
+            return at < (numberOfTriplesInList * 2);
         }
 
         @Override

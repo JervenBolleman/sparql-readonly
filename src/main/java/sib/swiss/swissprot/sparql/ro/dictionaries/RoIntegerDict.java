@@ -48,22 +48,36 @@ public class RoIntegerDict
     @Override
     public Optional<RoIntegerLiteral> find(IntegerLiteral value) {
         BigInteger integerValue = value.integerValue();
+        return find(integerValue);
+    }
+
+    public Optional<RoIntegerLiteral> find(Literal value) {
+        BigInteger integerValue = value.integerValue();
+        return find(integerValue);
+    }
+
+    public Optional<RoIntegerLiteral> find(int value) {
+        BigInteger integerValue = BigInteger.valueOf(value);
+        return find(integerValue);
+    }
+
+    public Optional<RoIntegerLiteral> find(BigInteger integerValue) {
         try {
             long intValueExact = integerValue.longValueExact();
             if ((SECOND_BYTE_TRUE & intValueExact) == SECOND_BYTE_TRUE) {
-                return realSearch(value);
+                return realSearch(integerValue);
             } else {
                 return Optional.of(new RoIntegerLiteral(intValueExact));
             }
         } catch (ArithmeticException e) {
-            return realSearch(value);
+            return realSearch(integerValue);
         }
     }
 
-    private Optional<RoIntegerLiteral> realSearch(IntegerLiteral value) {
+    private Optional<RoIntegerLiteral> realSearch(BigInteger value) {
         try {
             final Reader.Options options = new Reader.Options();
-            SearchArgument equals = SearchArgumentFactory.newBuilder().equals(INT_LONG_VALUE, PredicateLeaf.Type.LONG, value.longValue()).build();
+            SearchArgument equals = SearchArgumentFactory.newBuilder().equals(INT_LONG_VALUE, PredicateLeaf.Type.DECIMAL, value.longValue()).build();
             options.searchArgument(equals, new String[]{INT_LONG_VALUE});
             RecordReader rows = reader.rows(options);
             VectorizedRowBatch batch = schema.createRowBatch(1);

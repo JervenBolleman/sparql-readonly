@@ -186,7 +186,7 @@ public class RoStore extends AbstractSail {
                 final RDFParser parser = Rio.createParser(format, vf);
 
                 final PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
-                        this, bnodeDict, iriDict, literalDict, namespaces,
+                        this, bnodeDict, iriDict, literalDict, namespaces, integerDict,
                         subDataDirs.get(RoDirectories.PREDICATE_LISTS));
                 parser.setRDFHandler(handler);
                 parser.parse(new FileReader(file), "");

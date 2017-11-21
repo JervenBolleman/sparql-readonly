@@ -30,7 +30,8 @@ public class RoStoreTest {
 	private static final IRI PREDICATE = VF
 			.createIRI("http://example.org/predicate");
 	private static final Literal OBJECT = VF.createLiteral(true);
-        private static final Literal OBJECT2 = VF.createLiteral("hello");  
+        private static final Literal OBJECT2 = VF.createLiteral(1);
+        private static final Literal OBJECT3 = VF.createLiteral("hello");  
 	@Before
 	public void init() throws Exception {
 		dir = folder.newFolder().toPath();
@@ -55,6 +56,7 @@ public class RoStoreTest {
 
 		writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, OBJECT));
                 writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, OBJECT2));
+                writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, OBJECT3));
                 writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, PREDICATE));
 		writer.endRDF();
 
@@ -66,6 +68,6 @@ public class RoStoreTest {
 		store.load(file);
 		assertNotNull(store);
 
-                assertEquals(3, store.getConnection().size());
+                assertEquals(4, store.getConnection().size());
 	}
 }

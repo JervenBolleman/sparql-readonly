@@ -12,11 +12,14 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
+import org.eclipse.rdf4j.model.impl.IntegerLiteral;
+import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
 import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
 import sib.swiss.swissprot.sparql.ro.RoPredicateStore.Builder;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -29,6 +32,7 @@ public class PredicateListBuildingHandler implements RDFHandler {
     private final RoBnodeDictionary bnodeDict;
     private final RoIriDictionary iriDict;
     private final RoLiteralDict literalDict;
+    private final RoIntegerDict integerDict;
     private final Map<RoIri, RoPredicateStore.Builder> builders = new HashMap<>();
     private final File predicateListsDir;
     private final RoNamespaces roNamespaces;
@@ -36,12 +40,14 @@ public class PredicateListBuildingHandler implements RDFHandler {
     public PredicateListBuildingHandler(RoStore roStore,
             RoBnodeDictionary bnodeDict, RoIriDictionary iriDict,
             RoLiteralDict literalDict, RoNamespaces roNamespaces,
+            RoIntegerDict integerDict,
             File predicateListsDir) {
         this.roStore = roStore;
         this.bnodeDict = bnodeDict;
         this.iriDict = iriDict;
         this.literalDict = literalDict;
         this.roNamespaces = roNamespaces;
+        this.integerDict = integerDict;
         this.predicateListsDir = predicateListsDir;
     }
 
@@ -88,8 +94,9 @@ public class PredicateListBuildingHandler implements RDFHandler {
             if (st.getContext() != null) {
                 RoResource context = find(st.getContext()).get();
                 builder.add(subject, object, context);
-            } else
+            } else {
                 builder.add(subject, object, null);
+            }
         } catch (IOException e) {
             throw new RDFHandlerException(e);
         }
@@ -110,7 +117,16 @@ public class PredicateListBuildingHandler implements RDFHandler {
         if (subject instanceof Resource) {
             return find((Resource) subject);
         } else {
-            return literalDict.find((Literal) subject);
+            final Literal literal = (Literal) subject;
+            if (subject instanceof IntegerLiteral) {
+                return integerDict.find((IntegerLiteral) subject);
+            } else if (XMLSchema.INTEGER.equals(literal.getDatatype())) {
+                return integerDict.find(literal.integerValue());
+            } else if (XMLSchema.INT.equals(literal.getDatatype())) {
+                return integerDict.find(literal.intValue());
+            } else {
+                return literalDict.find(literal);
+            }
         }
     }
 
