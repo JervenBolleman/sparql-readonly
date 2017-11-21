@@ -15,6 +15,7 @@ import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
+import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
@@ -61,7 +62,7 @@ public class IriBooleanList extends RoResourceRoValueList
 
         @Override
         public boolean hasNext() {
-            return at < numberOfTriplesInList;
+            return at < (numberOfTriplesInList * 2);
         }
 
         @Override
@@ -72,15 +73,9 @@ public class IriBooleanList extends RoResourceRoValueList
             // use
             long objectId = getLongAtIndexInLongBuffers(at++, triples);
 
-            if (graph instanceof BNode) {
-                return new RoContextStatement(
-                        new RoIri(subjectId, iriDictionary), predicate,
-                        new RoIri(objectId, iriDictionary), graph);
-            } else {
-                return new OnlyRoIriContextStatement(subjectId,
-                        predicate.getLongId(), objectId, graph.getLongId(),
-                        iriDictionary);
-            }
+            return new RoContextStatement(
+                    new RoIri(subjectId, iriDictionary), predicate,
+                    new RoBooleanLiteral(objectId == 1L), graph);
         }
     }
 }

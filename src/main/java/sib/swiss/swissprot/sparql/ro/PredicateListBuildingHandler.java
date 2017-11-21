@@ -22,6 +22,7 @@ import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
+import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
@@ -124,6 +125,8 @@ public class PredicateListBuildingHandler implements RDFHandler {
                 return integerDict.find(literal.integerValue());
             } else if (XMLSchema.INT.equals(literal.getDatatype())) {
                 return integerDict.find(literal.intValue());
+            } else if (XMLSchema.BOOLEAN.equals(literal.getDatatype())) {
+                return Optional.of(new RoBooleanLiteral(literal.booleanValue()));
             } else {
                 return literalDict.find(literal);
             }
