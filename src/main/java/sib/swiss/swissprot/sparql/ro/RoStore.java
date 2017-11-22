@@ -186,7 +186,7 @@ public class RoStore extends AbstractSail {
                 final RDFParser parser = Rio.createParser(format, vf);
 
                 final PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
-                        this, bnodeDict, iriDict, literalDict, namespaces, integerDict,
+                        this, new RoDictionaries(iriDict, literalDict, bnodeDict, integerDict),
                         subDataDirs.get(RoDirectories.PREDICATE_LISTS));
                 parser.setRDFHandler(handler);
                 parser.parse(new FileReader(file), "");
@@ -198,10 +198,11 @@ public class RoStore extends AbstractSail {
     private void reinitPredicateStores()
             throws FileNotFoundException, IOException {
         stores.clear();
+         RoDictionaries dictionaries = new RoDictionaries(iriDict, literalDict, bnodeDict, integerDict);
         for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
                 .listFiles()) {
             final RoPredicateStore roPredicateStore = new RoPredicateStore(
-                    predicateDir, iriDict);
+                    predicateDir, dictionaries);
             RoIri predicate = roPredicateStore.getPredicate();
             stores.put(predicate, roPredicateStore);
         }
@@ -213,7 +214,7 @@ public class RoStore extends AbstractSail {
         if (store == null) {
             store = new RoPredicateStore(RoPredicateStore.initDirectory(
                     subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate),
-                    iriDict);
+                    new RoDictionaries(iriDict, literalDict, bnodeDict, integerDict));
             stores.put(predicate, store);
         }
         return store;

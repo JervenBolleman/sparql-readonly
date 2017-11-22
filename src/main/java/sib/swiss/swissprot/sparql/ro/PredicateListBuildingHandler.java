@@ -18,10 +18,6 @@ import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
 import sib.swiss.swissprot.sparql.ro.RoPredicateStore.Builder;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
@@ -30,25 +26,15 @@ import sib.swiss.swissprot.sparql.ro.values.RoValue;
 public class PredicateListBuildingHandler implements RDFHandler {
 
     private final RoStore roStore;
-    private final RoBnodeDictionary bnodeDict;
-    private final RoIriDictionary iriDict;
-    private final RoLiteralDict literalDict;
-    private final RoIntegerDict integerDict;
     private final Map<RoIri, RoPredicateStore.Builder> builders = new HashMap<>();
     private final File predicateListsDir;
-    private final RoNamespaces roNamespaces;
+    private final RoDictionaries dictionaries;
 
     public PredicateListBuildingHandler(RoStore roStore,
-            RoBnodeDictionary bnodeDict, RoIriDictionary iriDict,
-            RoLiteralDict literalDict, RoNamespaces roNamespaces,
-            RoIntegerDict integerDict,
+            RoDictionaries dictionaries,
             File predicateListsDir) {
         this.roStore = roStore;
-        this.bnodeDict = bnodeDict;
-        this.iriDict = iriDict;
-        this.literalDict = literalDict;
-        this.roNamespaces = roNamespaces;
-        this.integerDict = integerDict;
+        this.dictionaries = dictionaries;
         this.predicateListsDir = predicateListsDir;
     }
 
@@ -72,14 +58,14 @@ public class PredicateListBuildingHandler implements RDFHandler {
     @Override
     public void handleNamespace(String prefix, String uri)
             throws RDFHandlerException {
-        roNamespaces.add(prefix, uri);
+        dictionaries.getIriDict().getNamespaces().add(prefix, uri);
 
     }
 
     @Override
     public void handleStatement(Statement st) throws RDFHandlerException {
         try {
-            Optional<RoIri> found = iriDict.find(st.getPredicate());
+            Optional<RoIri> found = dictionaries.getIriDict().find(st.getPredicate());
             if (!found.isPresent()) {
                 throw new RDFHandlerException("all IRIs should be in the iriDict" + st.getPredicate().stringValue());
             }
@@ -87,7 +73,7 @@ public class PredicateListBuildingHandler implements RDFHandler {
             Builder builder = builders.get(predicate);
             if (builder == null) {
                 builder = new RoPredicateStore.Builder(RoPredicateStore.initDirectory(predicateListsDir, predicate),
-                        predicate, literalDict, roNamespaces, iriDict, bnodeDict);
+                        predicate, dictionaries);
                 builders.put(predicate, builder);
             }
             RoResource subject = find(st.getSubject()).get();
@@ -106,9 +92,9 @@ public class PredicateListBuildingHandler implements RDFHandler {
 
     private Optional<? extends RoResource> find(Resource subject) {
         if (subject instanceof IRI) {
-            return iriDict.find((IRI) subject);
+            return dictionaries.getIriDict().find((IRI) subject);
         } else if (subject instanceof BNode) {
-            return bnodeDict.find((BNode) subject);
+            return dictionaries.getBnodeDict().find((BNode) subject);
         } else {
             return Optional.empty();
         }
@@ -120,15 +106,15 @@ public class PredicateListBuildingHandler implements RDFHandler {
         } else {
             final Literal literal = (Literal) subject;
             if (subject instanceof IntegerLiteral) {
-                return integerDict.find((IntegerLiteral) subject);
+                return dictionaries.getIntDict().find((IntegerLiteral) subject);
             } else if (XMLSchema.INTEGER.equals(literal.getDatatype())) {
-                return integerDict.find(literal.integerValue());
+                return dictionaries.getIntDict().find(literal.integerValue());
             } else if (XMLSchema.INT.equals(literal.getDatatype())) {
-                return integerDict.find(literal.intValue());
+                return dictionaries.getIntDict().find(literal.intValue());
             } else if (XMLSchema.BOOLEAN.equals(literal.getDatatype())) {
                 return Optional.of(new RoBooleanLiteral(literal.booleanValue()));
             } else {
-                return literalDict.find(literal);
+                return dictionaries.getLiteralDict().find(literal);
             }
         }
     }

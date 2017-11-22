@@ -3,18 +3,11 @@ package sib.swiss.swissprot.sparql.ro.quads;
 import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLongAtIndexInLongBuffers;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.Map;
-
-import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
+import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 
-import sib.swiss.swissprot.sparql.ro.RoNamespaces;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
@@ -23,17 +16,8 @@ public class IriBooleanList extends RoResourceRoValueList
         implements Iterable<Statement> {
 
     public IriBooleanList(File file, RoIri predicate,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
-            RoIriDictionary iriDictionary) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, null, null);
-
-    }
-
-    public IriBooleanList(File file, RoIri predicate)
-            throws FileNotFoundException, IOException {
-        super(file, predicate);
+            RoDictionaries dictionaries) throws IOException {
+        super(file, predicate, dictionaries);
     }
 
     @Override
@@ -44,15 +28,15 @@ public class IriBooleanList extends RoResourceRoValueList
     public static class Builder extends AbstractBuilder {
 
         public Builder(File file, RoIri predicate,
-                RoIriDictionary iriDictionary, RoNamespaces namespaces)
+                RoDictionaries dictionaries)
                 throws IOException {
-            super(file, predicate, namespaces, iriDictionary, null, null);
+            super(file, predicate, dictionaries);
         }
 
         public IriBooleanList build() throws IOException {
             save();
-            return new IriBooleanList(file, predicate, bnodeGraphsMap, iriGraphsMap,
-                    namespaces, iriDictionary);
+            return new IriBooleanList(file, predicate,
+                    dictionaries);
         }
     }
 
@@ -74,7 +58,7 @@ public class IriBooleanList extends RoResourceRoValueList
             long objectId = getLongAtIndexInLongBuffers(at++, triples);
 
             return new RoContextStatement(
-                    new RoIri(subjectId, iriDictionary), predicate,
+                    new RoIri(subjectId, dictionaries.getIriDict()), predicate,
                     new RoBooleanLiteral(objectId == 1L), graph);
         }
     }

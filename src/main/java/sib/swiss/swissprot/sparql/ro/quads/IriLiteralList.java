@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
+import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
@@ -23,18 +24,9 @@ import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
 public class IriLiteralList extends RoResourceRoValueList {
 
-    public IriLiteralList(File file, RoIri predicate)
-            throws FileNotFoundException, IOException {
-        super(file, predicate);
-    }
-
     public IriLiteralList(File file, RoIri predicate,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
-            RoIriDictionary iriDictionary, RoLiteralDict literalDictionary) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, literalDictionary, null);
-
+            RoDictionaries dictionaries) throws IOException {
+        super(file, predicate, dictionaries);
     }
 
     @Override
@@ -45,15 +37,14 @@ public class IriLiteralList extends RoResourceRoValueList {
     public static class Builder extends AbstractBuilder {
 
         public Builder(File file, RoIri predicate,
-                RoIriDictionary iriDictionary, RoNamespaces namespaces, RoLiteralDict literalDict)
+                RoDictionaries dictionaries)
                 throws IOException {
-            super(file, predicate, namespaces, iriDictionary, literalDict, null);
+            super(file, predicate, dictionaries);
         }
 
         public IriLiteralList build() throws IOException {
             save();
-            return new IriLiteralList(file, predicate, bnodeGraphsMap,
-                    iriGraphsMap, namespaces, iriDictionary, literalDictionary);
+            return new IriLiteralList(file, predicate, dictionaries);
         }
     }
 
@@ -71,8 +62,8 @@ public class IriLiteralList extends RoResourceRoValueList {
             final RoResource graph = findGraphForTriple(at);
             long subjectId = getLongAtIndexInLongBuffers(at++, triples);
             long objectId = getLongAtIndexInLongBuffers(at++, triples);
-            return new RoContextStatement(new RoIri(subjectId, iriDictionary),
-                    predicate, new RoSimpleLiteral(objectId, literalDict), graph);
+            return new RoContextStatement(new RoIri(subjectId, dictionaries.getIriDict()),
+                    predicate, new RoSimpleLiteral(objectId, dictionaries.getLiteralDict()), graph);
 
         }
     }

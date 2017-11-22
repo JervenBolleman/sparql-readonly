@@ -22,43 +22,43 @@ public class RoFilteredTripleIterator implements
 
     public RoFilteredTripleIterator(RoStore store, Resource subj, IRI pred,
             Value obj, Resource[] contexts) {
+        Stream<Statement> stream;
         if (pred != null) {
             try {
-                predicateStores = store.getPredicateStore(pred)
-                        .iterator();
+                stream = store.getPredicateStore(pred).stream();
             } catch (IOException e) {
                 throw new QueryEvaluationException(e);
             }
         } else if (contexts == null || contexts.length == 0) {
-            Set<RoPredicateStore> st = store.getPredicateStores()
+            stream = store.getPredicateStores()
                     .values()
                     .stream()
-                    .collect(Collectors.toSet());
-
-            predicateStores = st.stream()
                     .flatMap(RoPredicateStore::stream)
-                    .filter(s -> s.getContext() == null)
-                    .iterator();
+                    .filter(s -> s.getContext() == null);
         } else if (contexts.length == 1) {
 
-            predicateStores = store.getPredicateStores()
+            stream = store.getPredicateStores()
                     .values()
                     .stream()
                     .flatMap(RoPredicateStore::stream)
-                    .filter(s -> contexts[0].equals(s.getContext()))
-                    .iterator();
+                    .filter(s -> contexts[0].equals(s.getContext()));
         } else {
             Set<Resource> collect = Arrays.stream(contexts)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
-            predicateStores = store.getPredicateStores()
+            stream = store.getPredicateStores()
                     .values()
                     .stream()
                     .flatMap(RoPredicateStore::stream)
                     .filter(s -> s.getContext() != null)
-                    .filter(s -> collect.contains(s.getContext()))
-                    .iterator();
+                    .filter(s -> collect.contains(s.getContext()));
         }
+        if (subj != null) {
+            stream = stream.filter(s -> s.getSubject().equals(subj));
+        } else if (obj != null) {
+            stream = stream.filter(s -> s.getObject().equals(obj));
+        }
+        predicateStores = stream.iterator();
     }
 
     @Override

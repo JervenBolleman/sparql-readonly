@@ -7,6 +7,7 @@ import java.util.Optional;
 import javax.xml.datatype.XMLGregorianCalendar;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.datatypes.XMLDatatypeUtil;
 import org.eclipse.rdf4j.model.util.Literals;
 
@@ -124,4 +125,14 @@ public class RoSimpleLiteral implements RoLiteral {
         return XMLDatatypeUtil.parseCalendar(getLabel());
     }
 
+    @Override
+    public boolean equals(Object object) {
+        if (object instanceof RoSimpleLiteral) {
+            return id == ((RoSimpleLiteral) object).id;
+        } else if (object instanceof Literal) {
+            return object.equals(this);
+        } else {
+            return super.equals(object);
+        }
+    }
 }

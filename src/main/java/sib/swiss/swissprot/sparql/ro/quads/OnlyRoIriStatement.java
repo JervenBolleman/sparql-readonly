@@ -19,6 +19,7 @@ public class OnlyRoIriStatement implements Statement {
         this.subject = subject;
         this.predicate = predicate;
         this.object = object;
+        assert iriDictionary != null;
         this.iriDictionary = iriDictionary;
     }
 

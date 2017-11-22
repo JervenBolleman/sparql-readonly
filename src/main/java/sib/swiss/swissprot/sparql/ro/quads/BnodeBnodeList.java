@@ -5,14 +5,10 @@ import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLon
 import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.Map;
 
 import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
+import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 
-import sib.swiss.swissprot.sparql.ro.RoNamespaces;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
@@ -20,28 +16,19 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 public class BnodeBnodeList extends RoResourceRoValueList {
 
     public BnodeBnodeList(File file, RoIri predicate,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            Map<RoIri, RoaringBitmap> iriGraphsMap, RoNamespaces roNamespaces,
-            RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, roNamespaces,
-                iriDictionary, null, bnodeDictionary);
-    }
-
-    public BnodeBnodeList(File file, RoIri predicate) throws IOException {
-        super(file, predicate);
+            RoDictionaries dictionaries) throws IOException {
+        super(file, predicate, dictionaries);
     }
 
     public static class Builder extends AbstractBuilder {
 
-        public Builder(File file, RoIri predicate, RoNamespaces roNamespaces,
-                RoIriDictionary iriDictionary, RoBnodeDictionary bnodeDictionary) throws IOException {
-            super(file, predicate, roNamespaces, iriDictionary, null, bnodeDictionary);
+        public Builder(File file, RoIri predicate, RoDictionaries dictionaries) throws IOException {
+            super(file, predicate, dictionaries);
         }
 
         public BnodeBnodeList build() throws IOException {
             save();
-            return new BnodeBnodeList(file, predicate, bnodeGraphsMap,
-                    iriGraphsMap, namespaces, iriDictionary, bnodeDictionary);
+            return new BnodeBnodeList(file, predicate, dictionaries);
         }
     }
 
