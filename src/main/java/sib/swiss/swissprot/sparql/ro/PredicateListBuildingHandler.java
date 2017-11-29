@@ -19,6 +19,7 @@ import org.eclipse.rdf4j.rio.RDFHandlerException;
 
 import sib.swiss.swissprot.sparql.ro.RoPredicateStore.Builder;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
+import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
@@ -110,7 +111,7 @@ public class PredicateListBuildingHandler implements RDFHandler {
             } else if (XMLSchema.INTEGER.equals(literal.getDatatype())) {
                 return dictionaries.getIntDict().find(literal.integerValue());
             } else if (XMLSchema.INT.equals(literal.getDatatype())) {
-                return dictionaries.getIntDict().find(literal.intValue());
+                return Optional.of(new RoIntegerLiteral(literal.intValue()));
             } else if (XMLSchema.BOOLEAN.equals(literal.getDatatype())) {
                 return Optional.of(new RoBooleanLiteral(literal.booleanValue()));
             } else {
