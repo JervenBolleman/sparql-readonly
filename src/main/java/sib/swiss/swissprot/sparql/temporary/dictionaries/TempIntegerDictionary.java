@@ -26,8 +26,7 @@ import org.apache.orc.Writer;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict.INT_LONG_VALUE;
-import static sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary.SECOND_BYTE_TRUE;
-
+import static sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary.SECOND_BYTE_TRUE;
 public class TempIntegerDictionary extends TempDictionary {
 
     private final Set<BigInteger> set = new HashSet<>();

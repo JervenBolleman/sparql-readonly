@@ -43,7 +43,7 @@ public class BnodeStringLiteralList extends RoResourceRoValueList {
 
         @Override
         protected RoBnode getSubjectFromLong(long id) {
-            return new RoBnode(id, dictionaries.getBnodeDict());
+            return new RoBnode(id);
         }
 
         @Override

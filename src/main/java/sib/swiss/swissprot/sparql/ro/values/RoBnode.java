@@ -1,7 +1,6 @@
 package sib.swiss.swissprot.sparql.ro.values;
 
 import org.eclipse.rdf4j.model.BNode;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 
 public class RoBnode implements BNode, RoResource {
 
@@ -12,10 +11,6 @@ public class RoBnode implements BNode, RoResource {
     public RoBnode(long id) {
         super();
         this.id = id;
-    }
-
-    public RoBnode(long id, RoBnodeDictionary bNodeDict) {
-        this(id);
     }
 
     @Override

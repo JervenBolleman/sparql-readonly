@@ -2,7 +2,6 @@ package sib.swiss.swissprot.sparql.ro;
 
 import java.io.IOException;
 
-import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Resource;
@@ -12,7 +11,6 @@ import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
-import sib.swiss.swissprot.sparql.temporary.dictionaries.TempBNodeDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIntegerDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
@@ -22,14 +20,13 @@ public class DictionaryBuildingHandler implements RDFHandler {
     private final RoStore roStore;
     private final TempIriDictionary iris;
     private final TempLiteralDictionary literals;
-    private final TempBNodeDictionary bnodes;
+
     private final TempIntegerDictionary integerDictionary;
 
     public DictionaryBuildingHandler(RoStore roStore,
-            TempBNodeDictionary bnodes, TempIriDictionary iris,
+            TempIriDictionary iris,
             TempLiteralDictionary dict, TempIntegerDictionary integerDictionary) {
         this.roStore = roStore;
-        this.bnodes = bnodes;
         this.iris = iris;
         this.literals = dict;
         this.integerDictionary = integerDictionary;
@@ -75,15 +72,7 @@ public class DictionaryBuildingHandler implements RDFHandler {
     public void addResource(Resource subject) throws IOException {
         if (subject instanceof IRI) {
             addIri((IRI) subject);
-        } else if (subject instanceof BNode) {
-            addBnode((BNode) subject);
         }
-
-    }
-
-    void addBnode(BNode subject) throws IOException {
-        bnodes.add(subject);
-
     }
 
     void addIri(IRI subject) throws IOException {
@@ -97,7 +86,6 @@ public class DictionaryBuildingHandler implements RDFHandler {
         if (object instanceof Literal) {
             addLiteral((Literal) object);
         }
-
     }
 
     void addLiteral(Literal object) throws IOException {

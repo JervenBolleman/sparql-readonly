@@ -61,7 +61,7 @@ public class BnodeBooleanList extends RoResourceRoValueList
 
             if (graph instanceof BNode) {
                 return new RoContextStatement(
-                        new RoBnode(subjectId, dictionaries.getBnodeDict()), predicate,
+                        new RoBnode(subjectId), predicate,
                         new RoIri(objectId, dictionaries.getIriDict()), graph);
             } else {
                 return new OnlyRoIriContextStatement(subjectId,

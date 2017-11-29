@@ -4,26 +4,17 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.stream.Stream;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
-import org.roaringbitmap.RoaringBitmap;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
-
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBnodeList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBooleanList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeIntegerList;

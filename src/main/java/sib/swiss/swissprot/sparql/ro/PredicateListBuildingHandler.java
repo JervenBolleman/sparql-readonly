@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
@@ -18,6 +19,7 @@ import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
 import sib.swiss.swissprot.sparql.ro.RoPredicateStore.Builder;
+import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -30,37 +32,32 @@ public class PredicateListBuildingHandler implements RDFHandler {
     private final Map<RoIri, RoPredicateStore.Builder> builders = new HashMap<>();
     private final File predicateListsDir;
     private final RoDictionaries dictionaries;
-
+    private final AtomicLong bnodeCounter;
+    private Map<String, Long> bnodeTempDict;
+            
     public PredicateListBuildingHandler(RoStore roStore,
             RoDictionaries dictionaries,
-            File predicateListsDir) {
+            File predicateListsDir, AtomicLong bnodeCounter) {
         this.roStore = roStore;
         this.dictionaries = dictionaries;
         this.predicateListsDir = predicateListsDir;
+        this.bnodeCounter = bnodeCounter;
     }
 
     @Override
     public void startRDF() throws RDFHandlerException {
-        // TODO Auto-generated method stub
-
+        bnodeTempDict = new HashMap<>();
     }
 
     @Override
     public void endRDF() throws RDFHandlerException {
-        for (Builder builder : builders.values()) {
-            try {
-                roStore.addPredicateStore(builder.build());
-            } catch (IOException e) {
-                throw new RDFHandlerException(e);
-            }
-        }
+        bnodeTempDict.clear();
     }
 
     @Override
     public void handleNamespace(String prefix, String uri)
             throws RDFHandlerException {
         dictionaries.getIriDict().getNamespaces().add(prefix, uri);
-
     }
 
     @Override
@@ -95,7 +92,16 @@ public class PredicateListBuildingHandler implements RDFHandler {
         if (subject instanceof IRI) {
             return dictionaries.getIriDict().find((IRI) subject);
         } else if (subject instanceof BNode) {
-            return dictionaries.getBnodeDict().find((BNode) subject);
+            String id = ((BNode) subject).getID();
+            if (bnodeTempDict.containsKey(id))
+                return Optional.of(new RoBnode(bnodeTempDict.get(id)));
+            else
+            {
+                long roid = bnodeCounter.incrementAndGet();
+                bnodeTempDict.put(id, roid);
+                return Optional.of(new RoBnode(roid));
+            }
+            
         } else {
             return Optional.empty();
         }
@@ -124,6 +130,12 @@ public class PredicateListBuildingHandler implements RDFHandler {
     public void handleComment(String comment) throws RDFHandlerException {
         // TODO Auto-generated method stub
 
+    }
+
+    void build() throws IOException {
+        for (Builder builder : builders.values()) {
+            roStore.addPredicateStore(builder.build());
+        }
     }
 
 }

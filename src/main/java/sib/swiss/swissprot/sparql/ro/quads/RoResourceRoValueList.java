@@ -26,7 +26,6 @@ import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBnodeDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
@@ -66,11 +65,6 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
 //            throws FileNotFoundException, IOException {
 //        this(file, predicate, getNamespaces(file), getRoIriDicts(file), getRoLiteralDicts(file), getRoBnodeDictionary(file));
 //    }
-
-    private static RoBnodeDictionary getRoBnodeDictionary(File file) {
-        // TODO Auto-generated method stub
-        return null;
-    }
 
     private static RoIriDictionary getRoIriDicts(File file) {
         // TODO Auto-generated method stub
