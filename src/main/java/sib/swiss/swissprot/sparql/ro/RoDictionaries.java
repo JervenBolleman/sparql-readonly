@@ -5,7 +5,7 @@
  */
 package sib.swiss.swissprot.sparql.ro;
 
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 
@@ -17,9 +17,9 @@ public class RoDictionaries {
 
     private final RoIriDictionary iriDict;
     private final RoLiteralDict literalDict;
-    private final RoIntegerDict intDict;
+    private final RoBigIntegerDict intDict;
 
-    public RoDictionaries(RoIriDictionary iriDict, RoLiteralDict literalDict, RoIntegerDict intDict) {
+    public RoDictionaries(RoIriDictionary iriDict, RoLiteralDict literalDict, RoBigIntegerDict intDict) {
         this.iriDict = iriDict;
         this.literalDict = literalDict;
         this.intDict = intDict;
@@ -33,7 +33,7 @@ public class RoDictionaries {
         return literalDict;
     }
 
-    public RoIntegerDict getIntDict() {
+    public RoBigIntegerDict getIntDict() {
         return intDict;
     }
 }

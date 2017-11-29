@@ -20,17 +20,17 @@ import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 
-public class RoIntegerDict
-        extends RoDictionary<RoIntegerLiteral, IntegerLiteral> {
+public class RoBigIntegerDict
+        extends RoDictionary<RoBigIntegerLiteral, IntegerLiteral> {
 
     public static final String INT_LONG_VALUE = "int_long_value";
     public static final String PATH_NAME = "integer_dict";
 
-    public RoIntegerDict(Reader reader) {
+    public RoBigIntegerDict(Reader reader) {
         super(reader);
     }
 
-    public Literal getFromId(long id) throws IOException {
+    public RoBigIntegerLiteral getFromId(long id) throws IOException {
         if ((SECOND_BYTE_TRUE & id) == SECOND_BYTE_TRUE) {
             long offset = id;
             RecordReader rows = reader.rows();
@@ -41,56 +41,71 @@ public class RoIntegerDict
             DecimalColumnVector longVector = (DecimalColumnVector) batch.cols[0];
             return new RoBigIntegerLiteral(id, longVector.vector[0].getHiveDecimal().bigDecimalValue().toBigInteger());
         } else {
-            return new RoIntegerLiteral(id);
+            return new RoBigIntegerLiteral(id);
         }
     }
 
     @Override
-    public Optional<RoIntegerLiteral> find(IntegerLiteral value) {
+    public Optional<RoBigIntegerLiteral> find(IntegerLiteral value) {
         BigInteger integerValue = value.integerValue();
         return find(integerValue);
     }
 
-    public Optional<RoIntegerLiteral> find(Literal value) {
+    public Optional<RoBigIntegerLiteral> find(Literal value) {
         BigInteger integerValue = value.integerValue();
         return find(integerValue);
     }
 
-    public Optional<RoIntegerLiteral> find(int value) {
+    public Optional<RoBigIntegerLiteral> find(int value) {
         BigInteger integerValue = BigInteger.valueOf(value);
         return find(integerValue);
     }
 
-    public Optional<RoIntegerLiteral> find(BigInteger integerValue) {
+    public Optional<RoBigIntegerLiteral> find(BigInteger integerValue) {
         try {
             long intValueExact = integerValue.longValueExact();
             if ((SECOND_BYTE_TRUE & intValueExact) == SECOND_BYTE_TRUE) {
                 return realSearch(integerValue);
             } else {
-                return Optional.of(new RoIntegerLiteral(intValueExact));
+                return Optional.of(new RoBigIntegerLiteral(intValueExact));
             }
         } catch (ArithmeticException e) {
             return realSearch(integerValue);
         }
     }
 
-    private Optional<RoIntegerLiteral> realSearch(BigInteger value) {
+    public RoBigIntegerLiteral fromColumn(VectorizedRowBatch batch, BigInteger value, long id) {
+        DecimalColumnVector longVector = (DecimalColumnVector) batch.cols[0];
+        for (int i = 0; i < longVector.vector.length; i++) {
+            BigInteger pv = longVector.vector[0].getHiveDecimal().bigDecimalValue().toBigInteger();
+            if (pv.equals(value)) {
+                return new RoBigIntegerLiteral(id + i, value);
+            }
+        }
+        return null;
+    }
+
+    private Optional<RoBigIntegerLiteral> realSearch(BigInteger value) {
         try {
             final Reader.Options options = new Reader.Options();
             SearchArgument equals = SearchArgumentFactory.newBuilder().equals(INT_LONG_VALUE, PredicateLeaf.Type.DECIMAL, value.longValue()).build();
             options.searchArgument(equals, new String[]{INT_LONG_VALUE});
             RecordReader rows = reader.rows(options);
+            long id = rows.getRowNumber();
             VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            if (nextBatch) {
-                LongColumnVector longVector = (LongColumnVector) batch.cols[0];
-                final RoIntegerLiteral roBigIntegerLiteral = new RoIntegerLiteral(longVector.vector[0]);
-                return Optional.of(roBigIntegerLiteral);
+            final boolean hasBatch = rows.nextBatch(batch);
+            if (hasBatch) {
+                final RoBigIntegerLiteral roBigIntegerLiteral = fromColumn(batch, value, id);
+                if (roBigIntegerLiteral == null) {
+                    return Optional.empty();
+                } else {
+                    return Optional.of(roBigIntegerLiteral);
+                }
             } else {
                 return Optional.empty();
             }
         } catch (IOException ex) {
-            Logger.getLogger(RoIntegerDict.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(RoBigIntegerDict.class.getName()).log(Level.SEVERE, null, ex);
             return Optional.empty();
         }
     }

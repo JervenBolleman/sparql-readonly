@@ -24,8 +24,8 @@ import org.apache.orc.TypeDescription;
 import org.apache.orc.Writer;
 
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
-import static sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict.INT_LONG_VALUE;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
+import static sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict.INT_LONG_VALUE;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary.SECOND_BYTE_TRUE;
 public class TempIntegerDictionary extends TempDictionary {
 
@@ -56,17 +56,17 @@ public class TempIntegerDictionary extends TempDictionary {
         }
     }
 
-    public RoIntegerDict load() throws IOException {
+    public RoBigIntegerDict load() throws IOException {
         Configuration conf = new Configuration();
         TypeDescription schema;
         schema = TypeDescription.createStruct()
                 .addField(INT_LONG_VALUE, TypeDescription.createDecimal());
         VectorizedRowBatch batch = schema.createRowBatch();
-        File file = new File(out.getAbsolutePath(), RoIntegerDict.PATH_NAME);
+        File file = new File(out.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
         if (file.exists()) {
             file.delete();
         }
-        final Path path = new Path(out.getAbsolutePath(), RoIntegerDict.PATH_NAME);
+        final Path path = new Path(out.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
         try (Writer writer = OrcFile.createWriter(path,
                 OrcFile.writerOptions(conf)
                         .setSchema(schema)
@@ -93,6 +93,6 @@ public class TempIntegerDictionary extends TempDictionary {
         }
 
         Reader reader = OrcFile.createReader(path, OrcFile.readerOptions(conf));
-        return new RoIntegerDict(reader);
+        return new RoBigIntegerDict(reader);
     }
 }

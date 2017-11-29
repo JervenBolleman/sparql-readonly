@@ -25,7 +25,7 @@ import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.helpers.AbstractSail;
 
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIntegerDict;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -43,7 +43,7 @@ public class RoStore extends AbstractSail {
             RoDirectories.class);
     private RoIriDictionary iriDict;
     private RoLiteralDict literalDict;
-    private RoIntegerDict integerDict;
+    private RoBigIntegerDict integerDict;
     private final Configuration conf;
 
     public RoStore() {
@@ -119,12 +119,12 @@ public class RoStore extends AbstractSail {
         if (!integerDir.exists()) {
             integerDir.mkdir();
         }
-        File integerFile = new File(integerDir, RoIntegerDict.PATH_NAME);
+        File integerFile = new File(integerDir, RoBigIntegerDict.PATH_NAME);
         if (!integerFile.exists()) {
             integerFile.createNewFile();
         }
-        Path integer = new Path(integerDir.getAbsolutePath(), RoIntegerDict.PATH_NAME);
-        integerDict = new RoIntegerDict(OrcFile.createReader(integer, OrcFile.readerOptions(conf)));
+        Path integer = new Path(integerDir.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
+        integerDict = new RoBigIntegerDict(OrcFile.createReader(integer, OrcFile.readerOptions(conf)));
 
         File bnodesDir = subDataDirs.get(RoDirectories.BNODE_DICTIONARIES);
         if (!bnodesDir.exists()) {
