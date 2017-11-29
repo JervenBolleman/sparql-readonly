@@ -226,8 +226,7 @@ public class RoConnection implements SailConnection {
             throws SailException {
 
         return new CloseableIteratorIteration<Namespace, SailException>() {
-            private Iterator<RoNamespace> namespaces = store.getNamespaces()
-                    .values().iterator();
+            private Iterator<RoNamespace> namespaces = store.getNamespaces().iterator();
 
             @Override
             public boolean hasNext() throws SailException {
@@ -246,7 +245,21 @@ public class RoConnection implements SailConnection {
 
 	@Override
     public String getNamespace(String prefix) throws SailException {
-        return store.getNamespaces().get(prefix).getName();
+       return store.getNamespaces()
+                .stream()
+                .map(RoNamespace::getPrefix)
+                .filter(n -> {
+                    if (prefix == null && n == null) {
+                        return true;
+                    } else if (prefix != null && prefix.equals(n)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                })
+                .findAny()
+                .orElse(null);
+
     }
 
     @Override

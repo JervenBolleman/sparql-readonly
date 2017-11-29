@@ -51,7 +51,7 @@ public class RoIriPrefixFollowedByNumberTest {
 			rb.serialize(dos);
 		}
 		final RoNamespaces namespaces = new RoNamespaces();
-		namespaces.putOrGet(0, NAMESPACE);
+		namespaces.add(roNamespace);
 
 		final RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
 		final RoIriNamespaceDictionary dict = iriDictionary

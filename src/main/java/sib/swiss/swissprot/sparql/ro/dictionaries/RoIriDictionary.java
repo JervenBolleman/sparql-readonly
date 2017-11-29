@@ -67,7 +67,7 @@ public class RoIriDictionary {
         RoIriPrefixFollowedByNumberDictionary temp = new RoIriPrefixFollowedByNumberDictionary(
                 offsetsFile, lengthString, roNamespace, this);
         idToIriDictionaryMap.put(roNamespace.getId(), temp);
-        namespaces.putIfAbsent(roNamespace.getPrefix(), roNamespace);
+        namespaces.add(roNamespace);
         return temp;
     }
 
@@ -77,7 +77,7 @@ public class RoIriDictionary {
         BasicRoIriNamespaceDictionary temp = new BasicRoIriNamespaceDictionary(reader,
                 roNamespace, this);
         idToIriDictionaryMap.put(roNamespace.getId(), temp);
-        namespaces.putIfAbsent(roNamespace.getPrefix(), roNamespace);
+        namespaces.add(roNamespace);
         return temp;
 
     }

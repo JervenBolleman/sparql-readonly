@@ -43,15 +43,14 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
     protected final LongBuffer[] triples;
     protected final long numberOfTriplesInList;
     protected final RoDictionaries dictionaries;
- 
+
     protected static long triplesInFile(File file) {
         return file.length() / (Long.BYTES * 2);
     }
-   
 
     protected RoResourceRoValueList(File file, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap, 
+            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
             RoDictionaries dictionaries) throws IOException {
         super();
         this.predicate = predicate;
@@ -84,7 +83,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
     }
 
     public RoResourceRoValueList(File file, RoIri predicate,
-           RoDictionaries dictionaries1)
+            RoDictionaries dictionaries1)
             throws FileNotFoundException, IOException {
         this(file, predicate, getIriGraphsMap(file, dictionaries1.getIriDict()),
                 getRoBnodeGraphsMap(file), dictionaries1);
@@ -99,9 +98,18 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
                 new FileInputStream(roNamespacesFile))) {
             int size = in.readInt();
             for (int i = 0; i < size; i++) {
-                String prefix = in.readUTF();
-                String namespace = in.readUTF();
-                roNamespaces.add(prefix, namespace);
+                RoNamespace namespace;
+                if (in.readBoolean()) {
+                    String prefix = in.readUTF();
+                    String namespaceV = in.readUTF();
+                    long id = in.readLong();
+                    namespace = new RoNamespace(prefix, namespaceV, id);
+                } else {
+                    String namespaceV = in.readUTF();
+                    long id = in.readLong();
+                    namespace = new RoNamespace(null, namespaceV, id);
+                }
+                roNamespaces.add(namespace);
             }
         }
         return roNamespaces;
@@ -208,7 +216,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         protected final DataOutputStream das;
         protected long numberOfTriplesInList;
         protected final RoDictionaries dictionaries;
-        
+
         protected AbstractBuilder(File file, RoIri predicate,
                 RoDictionaries dictionaries)
                 throws FileNotFoundException {
@@ -267,10 +275,17 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         protected void saveNamespace(RoNamespaces namespaces, File file) throws IOException {
             File roNamespacesFile = getRoNamespacesFile(file);
             try (DataOutputStream dasN = new DataOutputStream(new FileOutputStream(roNamespacesFile))) {
-                dasN.writeInt(namespaces.entrySet().size());
-                for (Map.Entry<String, RoNamespace> en : namespaces.entrySet()) {
-                    dasN.writeUTF(en.getKey());
-                    dasN.writeUTF(en.getValue().getName());
+                dasN.writeInt(namespaces.size());
+
+                for (RoNamespace en : namespaces) {
+                    if (en.getPrefix() != null) {
+                        dasN.writeBoolean(true);
+                        dasN.writeUTF(en.getPrefix());
+                    } else {
+                        dasN.writeBoolean(false);
+                    }
+                    dasN.writeUTF(en.getName());
+                    dasN.writeLong(en.getId());
                 }
             }
         }

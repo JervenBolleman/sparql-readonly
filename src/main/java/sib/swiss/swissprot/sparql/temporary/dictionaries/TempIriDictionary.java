@@ -20,6 +20,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.CompressionKind;
+import org.apache.orc.OrcConf;
 import org.apache.orc.OrcFile;
 import org.apache.orc.Reader;
 import org.apache.orc.TypeDescription;
@@ -124,14 +125,15 @@ public class TempIriDictionary extends TempDictionary {
 
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
-        int key = 0;
-        Configuration conf = new Configuration();
-        for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
 
-            RoNamespace roNamespace = namespaces.putOrGet(key++,
-                    namespaceTempFile.namespace);
-            File tempFile = namespaceTempFile.file;
+        Configuration conf = new Configuration();
+        conf.set(OrcConf.SARG_COLUMNS.getHiveConfName(), RoIriDictionary.IRI_VALUE);
+        conf.set(OrcConf.ENABLE_INDEXES.getHiveConfName(), "true");
+        for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
             String namespace = namespaceTempFile.namespace;
+            RoNamespace roNamespace = namespaces.add(null,
+                    namespace);
+            File tempFile = namespaceTempFile.file;
 
             final Path iripath = new Path(out.getAbsolutePath(), roNamespace.getId() + "-iris");
             File lengthString = new File(out, roNamespace.getId() + "-prefixed-iris");
@@ -193,7 +195,7 @@ public class TempIriDictionary extends TempDictionary {
         try (Writer writer = OrcFile.createWriter(iriPath,
                 OrcFile.writerOptions(conf)
                         .setSchema(schema)
-                        .compress(CompressionKind.LZ4))) {
+                        .compress(CompressionKind.NONE))) {
             Iterator<String> iterator = tempNodes
                     .iterator();
             while (iterator.hasNext()) {

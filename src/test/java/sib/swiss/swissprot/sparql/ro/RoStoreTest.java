@@ -25,7 +25,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 public class RoStoreTest {
-    
+
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
     private Path dir;
@@ -37,22 +37,22 @@ public class RoStoreTest {
     private static final Literal OBJECT = VF.createLiteral(true);
     private static final Literal OBJECT2 = VF.createLiteral(1);
     private static final Literal OBJECT3 = VF.createLiteral("hello");
-    
+
     @Before
     public void init() throws Exception {
-        dir = folder.newFolder().toPath();
+        dir = folder.newFolder("readonlystore").toPath();
     }
-    
+
     @Test
     public void basicConfigLoad() {
-        
+
         RoStoreFactory fact = new RoStoreFactory();
         final RoConfig config = fact.getConfig();
         config.setFile(dir.toString());
         RoStore store = fact.getSail(config);
         assertNotNull(store);
     }
-    
+
     @Test
     public void basicTipleLoad() throws IOException {
         File file = folder.newFile("test.ttl");
@@ -60,7 +60,7 @@ public class RoStoreTest {
                 new FileOutputStream(file));
         writer.startRDF();
         final Statement s1 = VF.createStatement(SUBJECT, PREDICATE, OBJECT);
-        
+
         writer.handleStatement(s1);
         final Statement s2 = VF.createStatement(SUBJECT, PREDICATE, OBJECT2);
         writer.handleStatement(s2);
@@ -69,7 +69,7 @@ public class RoStoreTest {
         final Statement s4 = VF.createStatement(SUBJECT, PREDICATE, PREDICATE);
         writer.handleStatement(s4);
         writer.endRDF();
-        
+
         RoStoreFactory fact = new RoStoreFactory();
         final RoConfig config = fact.getConfig();
         config.setFile(dir.toString());
@@ -77,14 +77,24 @@ public class RoStoreTest {
         store.initialize();
         store.load(file);
         assertNotNull(store);
-        
+
         CloseableIteration<? extends Statement, SailException> statements = store.getConnection().getStatements(null, PREDICATE, null, true);
         assertTrue(statements.hasNext());
-        final Statement next = statements.next();
-        
-        assertEquals(OBJECT, next.getObject());
-        assertEquals(SUBJECT, next.getSubject());
+        Statement next = statements.next();
+
         assertEquals(PREDICATE, next.getPredicate());
+        assertEquals(SUBJECT, next.getSubject());
+        assertEquals(PREDICATE, next.getObject());
+        assertTrue(statements.hasNext());
+
+        next = statements.next();
+        assertEquals(PREDICATE, next.getPredicate());
+        assertEquals(SUBJECT, next.getSubject());
+        assertEquals(OBJECT, next.getObject());
+
+        assertTrue(statements.hasNext());
+        next = statements.next();
+
         assertEquals(4, store.getConnection().size());
     }
 }

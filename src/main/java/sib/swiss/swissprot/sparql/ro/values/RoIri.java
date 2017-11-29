@@ -66,6 +66,6 @@ public class RoIri implements IRI, RoResource {
 
     @Override
     public String toString() {
-        return '<' + this.getNamespace() + this.getLocalName() + '>';
+        return this.getNamespace() + this.getLocalName();
     }
 }
