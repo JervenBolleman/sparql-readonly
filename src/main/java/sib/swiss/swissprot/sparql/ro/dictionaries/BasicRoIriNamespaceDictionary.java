@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
+import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -60,15 +61,20 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
                 SearchArgument equals = SearchArgumentFactory.newBuilder().equals(LOCAL_NAME_COLUMN, PredicateLeaf.Type.STRING, predicate.getLocalName()).build();
                 options.searchArgument(equals, new String[]{LOCAL_NAME_COLUMN});
                 RecordReader rows = reader.rows(options);
-                VectorizedRowBatch batch = schema.createRowBatch(1);
-                final boolean nextBatch = rows.nextBatch(batch);
+                VectorizedRowBatch batch = schema.createRowBatch();
                 final long id = rows.getRowNumber();
-                if (nextBatch) {
-                    final RoIri roIri = new RoIri(nameSpacedId(id), roIriDictionary);
-                    return Optional.of(roIri);
-                } else {
-                    return Optional.empty();
+                boolean nextBatch = rows.nextBatch(batch);
+                while (nextBatch) {
+                    for (int i = 0; i < batch.size; i++) {
+                        BytesColumnVector bcv = (BytesColumnVector) batch.cols[0];
+                        if (bcv.toString(i).equals(predicate.getLocalName())) {
+                            final RoIri roIri = new RoIri((id + i)|getNamespaceId(), roIriDictionary);
+                            return Optional.of(roIri);
+                        }
+                    }
                 }
+                return Optional.empty();
+
             } catch (IOException ex) {
                 Logger.getLogger(BasicRoIriNamespaceDictionary.class.getName()).log(Level.SEVERE, null, ex);
             }
