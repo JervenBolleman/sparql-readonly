@@ -44,7 +44,7 @@ public class RoStore extends AbstractSail {
     private RoIriDictionary iriDict;
     private RoLiteralDict literalDict;
     private RoBigIntegerDict integerDict;
-    private final Configuration conf;
+    protected final Configuration conf;
 
     public RoStore() {
         this.federatedServiceResolver = new FederatedServiceResolverImpl();
@@ -144,11 +144,11 @@ public class RoStore extends AbstractSail {
             throws RDFParseException, RDFHandlerException, IOException {
 
         final TempLiteralDictionary tempLitalDictionary = new TempLiteralDictionary(
-                subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES));
+                subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), conf);
         final TempIriDictionary tempIriDictionary = new TempIriDictionary(
-                subDataDirs.get(RoDirectories.IRI_DICTIONARIES));
+                subDataDirs.get(RoDirectories.IRI_DICTIONARIES), conf);
         final TempIntegerDictionary tempIntegerDictionary = new TempIntegerDictionary(
-                subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES));
+                subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), conf);
         for (File file : files) {
             final Optional<RDFFormat> op = Rio
                     .getParserFormatForFileName(file.getName());
@@ -191,7 +191,7 @@ public class RoStore extends AbstractSail {
         for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
                 .listFiles()) {
             final RoPredicateStore roPredicateStore = new RoPredicateStore(
-                    predicateDir, dictionaries);
+                    predicateDir, dictionaries, conf);
             RoIri predicate = roPredicateStore.getPredicate();
             stores.put(predicate, roPredicateStore);
         }
@@ -203,7 +203,7 @@ public class RoStore extends AbstractSail {
         if (store == null) {
             store = new RoPredicateStore(RoPredicateStore.initDirectory(
                     subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate),
-                    new RoDictionaries(iriDict, literalDict, integerDict));
+                    new RoDictionaries(iriDict, literalDict, integerDict), conf);
             stores.put(predicate, store);
         }
         return store;

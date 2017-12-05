@@ -27,12 +27,13 @@ import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict.INT_LONG_VALUE;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary.SECOND_BYTE_TRUE;
+
 public class TempIntegerDictionary extends TempDictionary {
 
     private final Set<BigInteger> set = new HashSet<>();
 
-    public TempIntegerDictionary(File out) {
-        super(out);
+    public TempIntegerDictionary(File out, Configuration conf) {
+        super(out, conf);
     }
 
     public void add(IntegerLiteral subject) throws IOException {
@@ -57,7 +58,6 @@ public class TempIntegerDictionary extends TempDictionary {
     }
 
     public RoBigIntegerDict load() throws IOException {
-        Configuration conf = new Configuration();
         TypeDescription schema;
         schema = TypeDescription.createStruct()
                 .addField(INT_LONG_VALUE, TypeDescription.createDecimal());

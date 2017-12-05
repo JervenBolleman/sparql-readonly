@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.Optional;
 
 import org.eclipse.rdf4j.model.IRI;
-import org.eclipse.rdf4j.model.impl.SimpleIRI;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
@@ -30,7 +29,7 @@ public class RoIri implements IRI, RoResource {
     @Override
     public String getNamespace() {
         final RoNamespaces namespaces = dict.getNamespaces();
-        return namespaces.getFromId(id).getName();
+        return namespaces.getFromId(id >>> 32).getName();
     }
 
     @Override

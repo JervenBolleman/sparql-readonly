@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.CompressionKind;
 import org.apache.orc.OrcConf;
@@ -32,6 +33,7 @@ import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
@@ -90,8 +92,8 @@ public class TempIriDictionary extends TempDictionary {
     private final Map<String, FileOutputStream> namespaces_fos = new HashMap<>();
     private final Map<String, String> namespaces_prefix = new HashMap<>();
 
-    public TempIriDictionary(File out) {
-        super(out);
+    public TempIriDictionary(File out, Configuration conf) {
+        super(out, conf);
     }
 
     public void add(IRI subject) throws IOException {
@@ -126,9 +128,9 @@ public class TempIriDictionary extends TempDictionary {
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
 
-        Configuration conf = new Configuration();
-        conf.set(OrcConf.SARG_COLUMNS.getHiveConfName(), RoIriDictionary.IRI_VALUE);
-        conf.set(OrcConf.ENABLE_INDEXES.getHiveConfName(), "true");
+//        Configuration conf = new Configuration();
+//        conf.set(OrcConf.SARG_COLUMNS.getHiveConfName(), RoIriDictionary.IRI_VALUE);
+//        conf.set(OrcConf.ENABLE_INDEXES.getHiveConfName(), "true");
         for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
             String namespace = namespaceTempFile.namespace;
             RoNamespace roNamespace = namespaces.add(null,
@@ -188,27 +190,34 @@ public class TempIriDictionary extends TempDictionary {
 
     private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, Path iriPath, Configuration conf)
             throws IOException, FileNotFoundException {
-        TypeDescription schema = TypeDescription.createStruct()
+        TypeDescription schema = TypeDescription
+                .createStruct()
+                .addField(RoDictionary.ID, TypeDescription.createLong())
                 .addField(RoIriDictionary.IRI_VALUE, TypeDescription.createString());
         VectorizedRowBatch batch = schema.createRowBatch();
-        BytesColumnVector col = (BytesColumnVector) batch.cols[0];
+
+        Iterator<String> iterator = tempNodes.iterator();
+
         try (Writer writer = OrcFile.createWriter(iriPath,
                 OrcFile.writerOptions(conf)
-                        .setSchema(schema)
-                        .compress(CompressionKind.NONE))) {
-            Iterator<String> iterator = tempNodes
-                    .iterator();
+                        .setSchema(schema))) {
+            long i = 0;
+            LongColumnVector idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
+            BytesColumnVector col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
             while (iterator.hasNext()) {
-
                 if (batch.size == batch.getMaxSize()) {
                     writer.addRowBatch(batch);
                     batch.reset();
+                    idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
+                    col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
                 }
-                col.setVal(batch.size++, iterator.next().getBytes());
+
+                idcol.vector[batch.size] = i++;
+                final byte[] bytes = iterator.next().getBytes();
+                col.setVal(batch.size++, bytes);
             }
-            if (batch.size != 0) {
-                writer.addRowBatch(batch);
-            }
+            writer.addRowBatch(batch);
+
         }
     }
 

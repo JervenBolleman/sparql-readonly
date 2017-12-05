@@ -16,7 +16,11 @@ import org.eclipse.rdf4j.model.Value;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
 public abstract class RoDictionary<T extends RoValue, V extends Value> {
+
     public static final long SECOND_BYTE_TRUE = 1L << 63;
+    public static final String ID = "id_col";
+    public static final int VALUE_COL = 1;
+    public static final int ID_COL = 0;
     protected final Reader reader;
     protected final TypeDescription schema;
 
@@ -27,13 +31,14 @@ public abstract class RoDictionary<T extends RoValue, V extends Value> {
     }
 
     protected String readStringAt(long offset) throws IOException {
-        RecordReader rows = reader.rows();
-        rows.seekToRow(offset);
-        VectorizedRowBatch batch = schema.createRowBatch();
-        final boolean nextBatch = rows.nextBatch(batch);
-        assert nextBatch;
-        BytesColumnVector stringVector = (BytesColumnVector) batch.cols[0];
-        return stringVector.toString(0);
+        try (RecordReader rows = reader.rows()) {
+            rows.seekToRow(offset);
+            VectorizedRowBatch batch = schema.createRowBatch();
+            final boolean nextBatch = rows.nextBatch(batch);
+            assert nextBatch;
+            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[VALUE_COL];
+            return stringVector.toString(0);
+        }
     }
 
     public abstract Optional<T> find(V value);

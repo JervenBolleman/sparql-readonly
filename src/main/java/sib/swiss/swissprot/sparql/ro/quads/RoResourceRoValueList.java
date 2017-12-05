@@ -1,8 +1,5 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import java.io.DataInputStream;
-import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLongAtIndexInLongBuffers;
-
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -11,130 +8,74 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.nio.LongBuffer;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.apache.orc.OrcFile;
+import org.apache.orc.Reader;
+import org.apache.orc.RecordReader;
+import org.apache.orc.TypeDescription;
+import org.apache.orc.Writer;
 
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 
-import sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
-import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
+import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
-public abstract class RoResourceRoValueList implements Iterable<Statement> {
+public abstract class RoResourceRoValueList<S extends RoResource, O extends RoValue> implements Iterable<Statement> {
 
+    protected static final String SUBJECT = "subject";
+    protected static final String OBJECT = "object";
     protected final Map<RoIri, RoaringBitmap> iriGraphsMap;
     protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap;
     protected final RoIri predicate;
-    protected final LongBuffer[] triples;
-    protected final long numberOfTriplesInList;
+    protected final Reader triples;
+
     protected final RoDictionaries dictionaries;
 
-    protected static long triplesInFile(File file) {
-        return file.length() / (Long.BYTES * 2);
+    protected long triplesInFile() {
+        return triples.getNumberOfRows();
     }
 
-    protected RoResourceRoValueList(File file, RoIri predicate,
+    protected abstract S getSubject(VectorizedRowBatch batch, int index);
+
+    protected abstract O getObject(VectorizedRowBatch batch, int index);
+
+    protected RoResourceRoValueList(File dir, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            RoDictionaries dictionaries) throws IOException {
+            RoDictionaries dictionaries, Configuration conf) throws IOException {
         super();
         this.predicate = predicate;
         this.iriGraphsMap = iriGraphsMap;
         this.bNodeGraphsMap = bNodeGraphsMap;
-        this.triples = ByteBuffersBackedByFilesTools
-                .openLongBuffer(file.toPath());
-        this.numberOfTriplesInList = triplesInFile(file);
+        this.triples = OrcFile.createReader(new Path(dir.getAbsolutePath(), "triples"), OrcFile.readerOptions(conf));
         this.dictionaries = dictionaries;
-    }
-//
-//    public RoResourceRoValueList(File file, RoIri predicate)
-//            throws FileNotFoundException, IOException {
-//        this(file, predicate, getNamespaces(file), getRoIriDicts(file), getRoLiteralDicts(file), getRoBnodeDictionary(file));
-//    }
-
-    private static RoIriDictionary getRoIriDicts(File file) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    private static RoLiteralDict getRoLiteralDicts(File file) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    public RoResourceRoValueList(File file, RoIri predicate,
-            RoDictionaries dictionaries1)
-            throws FileNotFoundException, IOException {
-        this(file, predicate, getIriGraphsMap(file, dictionaries1.getIriDict()),
-                getRoBnodeGraphsMap(file), dictionaries1);
-    }
-
-    private static RoNamespaces getNamespaces(File file)
-            throws FileNotFoundException, IOException {
-
-        File roNamespacesFile = getRoNamespacesFile(file);
-        RoNamespaces roNamespaces = new RoNamespaces();
-        try (DataInputStream in = new DataInputStream(
-                new FileInputStream(roNamespacesFile))) {
-            int size = in.readInt();
-            for (int i = 0; i < size; i++) {
-                RoNamespace namespace;
-                if (in.readBoolean()) {
-                    String prefix = in.readUTF();
-                    String namespaceV = in.readUTF();
-                    long id = in.readLong();
-                    namespace = new RoNamespace(prefix, namespaceV, id);
-                } else {
-                    String namespaceV = in.readUTF();
-                    long id = in.readLong();
-                    namespace = new RoNamespace(null, namespaceV, id);
-                }
-                roNamespaces.add(namespace);
-            }
-        }
-        return roNamespaces;
-    }
-
-    private static Map<RoIri, RoaringBitmap> getIriGraphsMap(File file,
-            RoIriDictionary dict) throws FileNotFoundException, IOException {
-        File graphs = getIriGraphsFile(file);
-
-        try (ObjectInputStream in = new ObjectInputStream(
-                new FileInputStream(graphs))) {
-            int numberOfGraphs = in.readInt();
-            long[] graphIds = new long[numberOfGraphs];
-            RoaringBitmap[] roaringBitmaps = new RoaringBitmap[numberOfGraphs];
-            readData(in, numberOfGraphs, graphIds, roaringBitmaps);
-
-            Map<RoIri, RoaringBitmap> map = new HashMap<>();
-            for (int i = 0; i < numberOfGraphs; i++) {
-                map.put(new RoIri(graphIds[i], dict), roaringBitmaps[i]);
-            }
-            return map;
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
     }
 
     protected static File getIriGraphsFile(File file) {
         return new File(file.getParentFile(), file.getName() + "irigraphs");
     }
 
-    private static void readData(ObjectInputStream in, int numberOfGraphs,
+    private static void readData(ObjectInputStream in,
             long[] graphIds, RoaringBitmap[] maps)
             throws IOException, ClassNotFoundException {
 
@@ -147,7 +88,7 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         }
     }
 
-    private static Map<RoBnode, RoaringBitmap> getRoBnodeGraphsMap(File file)
+    protected static Map<RoIri, RoaringBitmap> getRoIriGraphsMap(File file, RoIriDictionary iriDict)
             throws FileNotFoundException, IOException {
         File graphs = getBnodeGraphsFile(file);
         try (ObjectInputStream in = new ObjectInputStream(
@@ -155,7 +96,27 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
             int numberOfGraphs = in.readInt();
             long[] graphIds = new long[numberOfGraphs];
             RoaringBitmap[] roaringBitmaps = new RoaringBitmap[numberOfGraphs];
-            readData(in, numberOfGraphs, graphIds, roaringBitmaps);
+            readData(in, graphIds, roaringBitmaps);
+
+            Map<RoIri, RoaringBitmap> map = new HashMap<>();
+            for (int i = 0; i < numberOfGraphs; i++) {
+                map.put(new RoIri(graphIds[i], iriDict), roaringBitmaps[i]);
+            }
+            return map;
+        } catch (ClassNotFoundException e) {
+            throw new IOException(e);
+        }
+    }
+
+    protected static Map<RoBnode, RoaringBitmap> getRoBnodeGraphsMap(File file)
+            throws FileNotFoundException, IOException {
+        File graphs = getBnodeGraphsFile(file);
+        try (ObjectInputStream in = new ObjectInputStream(
+                new FileInputStream(graphs))) {
+            int numberOfGraphs = in.readInt();
+            long[] graphIds = new long[numberOfGraphs];
+            RoaringBitmap[] roaringBitmaps = new RoaringBitmap[numberOfGraphs];
+            readData(in, graphIds, roaringBitmaps);
 
             Map<RoBnode, RoaringBitmap> map = new HashMap<>();
             for (int i = 0; i < numberOfGraphs; i++) {
@@ -201,25 +162,31 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         return StreamSupport.stream(spliterator(), false);
     }
 
-    protected static abstract class AbstractBuilder {
+    protected static abstract class AbstractBuilder<S extends RoResource, O extends RoValue> {
 
         protected final File file;
         protected final RoIri predicate;
         protected final Map<RoIri, RoaringBitmap> iriGraphsMap = new HashMap<>();
         protected final Map<RoBnode, RoaringBitmap> bnodeGraphsMap = new HashMap<>();
-        protected final DataOutputStream das;
+        protected final Writer writer;
         protected long numberOfTriplesInList;
         protected final RoDictionaries dictionaries;
+        protected final Configuration configuration;
+        private VectorizedRowBatch batch;
 
         protected AbstractBuilder(File file, RoIri predicate,
-                RoDictionaries dictionaries)
-                throws FileNotFoundException {
+                RoDictionaries dictionaries, Configuration configuration, Supplier<TypeDescription> schemaF)
+                throws FileNotFoundException, IOException {
             super();
             this.file = file;
             this.predicate = predicate;
-            das = new DataOutputStream(new FileOutputStream(file, true));
-            numberOfTriplesInList = triplesInFile(file);
+            final TypeDescription schema = schemaF.get();
+            this.writer = OrcFile.createWriter(new Path(file.getAbsolutePath()),
+                    OrcFile.writerOptions(configuration)
+                            .setSchema(schema));
             this.dictionaries = dictionaries;
+            this.configuration = configuration;
+            this.batch = schema.createRowBatch();
         }
 
         protected RoaringBitmap bitmapForContext(final RoResource context) {
@@ -241,29 +208,20 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
             return filter;
         }
 
-        public void add(RoResource subject, RoResource object,
+        public void add(S subject, O object,
                 RoResource context) throws IOException {
-
-            das.writeLong(subject.getLongId());
-            das.writeLong(object.getLongId());
+            if (batch.size == batch.getMaxSize()) {
+                writer.addRowBatch(batch);
+                batch.reset();
+            }
             numberOfTriplesInList++;
+            addSubject(batch, subject, numberOfTriplesInList);
+            addObject(batch, object, numberOfTriplesInList);
             final RoaringBitmap bitmapForContext = bitmapForContext(context);
             if (bitmapForContext != null) {
                 bitmapForContext.add((int) numberOfTriplesInList);
             }
             //else it is in the default context
-        }
-
-        public void add(RoResource subject, RoLiteral object,
-                RoResource context) throws IOException {
-
-            das.writeLong(subject.getLongId());
-            das.writeLong(object.getLongId());
-            numberOfTriplesInList++;
-            final RoaringBitmap bitmapForContext = bitmapForContext(context);
-            if (bitmapForContext != null) {
-                bitmapForContext.add((int) numberOfTriplesInList);
-            }
         }
 
         protected void saveNamespace(RoNamespaces namespaces, File file) throws IOException {
@@ -317,36 +275,65 @@ public abstract class RoResourceRoValueList implements Iterable<Statement> {
         }
 
         protected void save() throws IOException {
-            das.close();
+            writer.addRowBatch(batch);
+            writer.close();
             saveContextBitmaps();
             saveNamespace(dictionaries.getIriDict().getNamespaces(), file);
         }
+
+        protected final void addSubject(VectorizedRowBatch batch, S subject, long numberOfTriplesInList1) {
+            LongColumnVector col = (LongColumnVector) batch.cols[0];
+            col.vector[batch.size] = subject.getLongId();
+        }
+
+        protected void addObject(VectorizedRowBatch batch, O object, long numberOfTriplesInList1) {
+            LongColumnVector col = (LongColumnVector) batch.cols[0];
+            col.vector[batch.size++] = object.getLongId();
+        }
     }
 
-    protected abstract class ResourceValueListIterator<S, O>
+    protected abstract class RoResourceValueListIterator
             implements Iterator<Statement> {
 
-        private int at = 0;
+        private final RecordReader rows;
+        protected final VectorizedRowBatch batch;
+        protected int inbatch;
+
+        protected RoResourceValueListIterator(TypeDescription schema) {
+            try {
+                this.rows = triples.rows();
+            } catch (IOException ex) {
+                Logger.getLogger(RoResourceRoValueList.class.getName()).log(Level.SEVERE, null, ex);
+                throw new RuntimeException(ex);
+            }
+            this.batch = schema.createRowBatch();
+            this.inbatch = 0;
+        }
 
         @Override
         public Statement next() {
-            final RoResource graph = findGraphForTriple(at);
-            long subjectId = getLongAtIndexInLongBuffers(at++, triples); // increment
-            // after
-            // use
-            long objectId = getLongAtIndexInLongBuffers(at++, triples);
+            S subject = getSubject(batch, inbatch);
+            O object = getObject(batch, inbatch);
+            this.inbatch++;
+            return statement(subject, predicate, object, null);
+        }
 
-            return new RoContextStatement(new RoBnode(subjectId), predicate,
-                    new RoIntegerLiteral(objectId), graph);
+        public Statement statement(S subject, RoIri predicate, O object, RoResource graph) {
+            return new RoContextStatement(subject, predicate,
+                    object, graph);
         }
 
         @Override
         public boolean hasNext() {
-            return at < numberOfTriplesInList * 2;
+            try {
+                if (batch != null) {
+                    return inbatch < batch.count();
+                }
+                inbatch = 0;
+                return rows.nextBatch(batch);
+            } catch (IOException ex) {
+                return false;
+            }
         }
-
-        protected abstract S getSubjectFromLong(long id);
-
-        protected abstract O getObjectFromLong(long id);
     }
 }

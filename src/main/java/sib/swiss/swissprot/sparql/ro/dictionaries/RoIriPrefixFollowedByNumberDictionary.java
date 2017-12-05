@@ -122,8 +122,8 @@ public class RoIriPrefixFollowedByNumberDictionary
     }
 
     @Override
-    public int getNamespaceId() {
-        return (int) namespace.getId();
+    public long getNamespaceId() {
+        return namespace.getId();
     }
 
     @Override

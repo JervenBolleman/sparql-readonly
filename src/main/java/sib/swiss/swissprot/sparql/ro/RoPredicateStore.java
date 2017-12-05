@@ -11,6 +11,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.stream.Stream;
+import org.apache.hadoop.conf.Configuration;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Statement;
@@ -19,6 +20,7 @@ import sib.swiss.swissprot.sparql.ro.quads.BnodeBnodeList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBooleanList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeIntegerList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeIriList;
+import sib.swiss.swissprot.sparql.ro.quads.BnodeLiteralList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeStringLiteralList;
 import sib.swiss.swissprot.sparql.ro.quads.IriBnodeList;
 import sib.swiss.swissprot.sparql.ro.quads.IriBooleanList;
@@ -32,6 +34,7 @@ import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
+import sib.swiss.swissprot.sparql.ro.values.RoStringLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
 public class RoPredicateStore implements Iterable<Statement> {
@@ -61,8 +64,9 @@ public class RoPredicateStore implements Iterable<Statement> {
     private static final String FILE_TO_STORE_BNODE_INTEGER = "bnode_integer";
     private static final String FILE_TO_STORE_BNODE_BOOLEAN = "bnode_boolean";
     private static final String FILE_TO_STORE_BNODE_STRING = "bnode_string";
+    private static final String FILE_TO_STORE_BNODE_LITERAL = "bnode_literal";
 
-    public RoPredicateStore(File directory, RoDictionaries dictionaries)
+    public RoPredicateStore(File directory, RoDictionaries dictionaries, Configuration configuration)
             throws IOException {
 
         try (DataInputStream fr = new DataInputStream(new FileInputStream(
@@ -71,22 +75,22 @@ public class RoPredicateStore implements Iterable<Statement> {
         }
 
         this.iriIriList = new IriIriList(new File(directory, FILE_TO_STORE_IRI_IRI),
-                predicate, dictionaries);
+                predicate, dictionaries, configuration);
         this.iriBnodeList = new IriBnodeList(new File(directory, FILE_TO_STORE_IRI_BNODE),
-                predicate, dictionaries);
+                predicate, dictionaries, configuration);
         this.iriIntegerList = new IriIntegerLiteralList(
-                new File(directory, FILE_TO_STORE_IRI_INTEGER), predicate, dictionaries);
+                new File(directory, FILE_TO_STORE_IRI_INTEGER), predicate, dictionaries, configuration);
         this.iriBooleanList = new IriBooleanList(
-                new File(directory, FILE_TO_STORE_IRI_BOOLEAN), predicate, dictionaries);
+                new File(directory, FILE_TO_STORE_IRI_BOOLEAN), predicate, dictionaries, configuration);
 
         this.bNodeIriList = new BnodeIriList(new File(directory, FILE_TO_STORE_BNODE_IRI),
-                predicate, dictionaries);
+                predicate, dictionaries, configuration);
         this.bNodeBnodeList = new BnodeBnodeList(
-                new File(directory, FILE_TO_STORE_IRI_BNODE), predicate, dictionaries);
+                new File(directory, FILE_TO_STORE_IRI_BNODE), predicate, dictionaries, configuration);
         this.bNodeIntList = new BnodeIntegerList(
-                new File(directory, FILE_TO_STORE_BNODE_INTEGER), predicate, dictionaries);
+                new File(directory, FILE_TO_STORE_BNODE_INTEGER), predicate, dictionaries, configuration);
         this.bNodeBooleanList = new BnodeBooleanList(
-                new File(directory, FILE_TO_STORE_BNODE_BOOLEAN), predicate, dictionaries);
+                new File(directory, FILE_TO_STORE_BNODE_BOOLEAN), predicate, dictionaries, configuration);
     }
 
     private RoPredicateStore(RoIri predicate,
@@ -149,41 +153,48 @@ public class RoPredicateStore implements Iterable<Statement> {
         private final IriIntegerLiteralList.Builder iriIntegerBuilder;
         private final IriLiteralList.Builder iriLiteralBuilder;
         private final IriBooleanList.Builder iriBooleanBuilder;
+        private final BnodeLiteralList.Builder bnodeLiteralBuilder;
 
         protected Builder(File directory, RoIri predicate,
-                RoDictionaries dictionaries) throws IOException {
+                RoDictionaries dictionaries, Configuration configuration) throws IOException {
             this.directory = directory;
             initDirectory(directory, predicate);
             this.predicate = predicate;
             this.iriIriBuilder = new IriIriList.Builder(
                     new File(directory, FILE_TO_STORE_IRI_IRI), predicate,
-                    dictionaries);
-            this.bNodeIriBuilder = new BnodeIriList.Builder(
-                    new File(directory, FILE_TO_STORE_BNODE_IRI), predicate,
-                    dictionaries);
-            this.bNodeBnodeBuilder = new BnodeBnodeList.Builder(
-                    new File(directory, FILE_TO_STORE_BNODE_BNODE), predicate,
-                    dictionaries);
-            this.iriBnodeBuilder = new IriBnodeList.Builder(
-                    new File(directory, FILE_TO_STORE_IRI_BNODE), predicate,
-                    dictionaries);
-            this.iriIntegerBuilder = new IriIntegerLiteralList.Builder(
-                    new File(directory, FILE_TO_STORE_IRI_INTEGER), predicate,
-                    dictionaries);
-            this.iriLiteralBuilder = new IriLiteralList.Builder(
-                    new File(directory, FILE_TO_STORE_IRI_LITERAL), predicate,
-                    dictionaries);
-            this.bNodeIntegerBuilder = new BnodeIntegerList.Builder(
-                    new File(directory, FILE_TO_STORE_BNODE_INTEGER), predicate,
-                    dictionaries);
-            this.bnodeStringBuilder = new BnodeStringLiteralList.Builder(
-                    new File(directory, FILE_TO_STORE_BNODE_STRING), predicate,
-                    dictionaries);
-            this.bNodeBooleanBuilder = new BnodeBooleanList.Builder(new File(directory, FILE_TO_STORE_BNODE_BOOLEAN), predicate,
-                    dictionaries);
+                    dictionaries, configuration);
             this.iriBooleanBuilder = new IriBooleanList.Builder(
                     new File(directory, FILE_TO_STORE_IRI_BOOLEAN), predicate,
-                    dictionaries);
+                    dictionaries, configuration);
+            this.iriBnodeBuilder = new IriBnodeList.Builder(
+                    new File(directory, FILE_TO_STORE_IRI_BNODE), predicate,
+                    dictionaries, configuration);
+            this.iriIntegerBuilder = new IriIntegerLiteralList.Builder(
+                    new File(directory, FILE_TO_STORE_IRI_INTEGER), predicate,
+                    dictionaries, configuration);
+            this.iriLiteralBuilder = new IriLiteralList.Builder(
+                    new File(directory, FILE_TO_STORE_IRI_LITERAL), predicate,
+                    dictionaries, configuration);
+            
+            this.bNodeIriBuilder = new BnodeIriList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_IRI), predicate,
+                    dictionaries, configuration);
+            this.bNodeBnodeBuilder = new BnodeBnodeList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_BNODE), predicate,
+                    dictionaries, configuration);
+            this.bNodeIntegerBuilder = new BnodeIntegerList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_INTEGER), predicate,
+                    dictionaries, configuration);
+            this.bnodeStringBuilder = new BnodeStringLiteralList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_STRING), predicate,
+                    dictionaries, configuration);
+            this.bnodeLiteralBuilder = new BnodeLiteralList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_LITERAL), predicate,
+                    dictionaries, configuration);
+            this.bNodeBooleanBuilder = new BnodeBooleanList.Builder(
+                    new File(directory, FILE_TO_STORE_BNODE_BOOLEAN), predicate,
+                    dictionaries, configuration);
+            
         }
 
         public void add(RoResource subject, RoValue object, RoResource context)
@@ -236,12 +247,14 @@ public class RoPredicateStore implements Iterable<Statement> {
 
             if (object instanceof RoIntegerLiteral) {
                 addBnodeInteger(subject, (RoIntegerLiteral) object, context);
-            } else if (object.getDatatype() == XMLSchema.STRING)
-				;
-            addBnodeString(subject, object, context);
+            } else if (object instanceof RoStringLiteral) {
+                addBnodeString(subject, (RoStringLiteral) object, context);
+            } else {
+                bnodeLiteralBuilder.add(subject, object, context);
+            }
         }
 
-        private void addBnodeString(RoBnode subject, RoLiteral object,
+        private void addBnodeString(RoBnode subject, RoStringLiteral object,
                 RoResource context) throws IOException {
             bnodeStringBuilder.add(subject, object, context);
         }

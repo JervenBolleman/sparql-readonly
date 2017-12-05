@@ -35,8 +35,8 @@ public class TempLiteralDictionary extends TempDictionary {
     private final Map<IRI, FileOutputStream> datatypes = new HashMap<>();
     private final Map<String, FileOutputStream> languages = new HashMap<>();
 
-    public TempLiteralDictionary(File out) {
-        super(out);
+    public TempLiteralDictionary(File out, Configuration conf) {
+        super(out, conf);
     }
 
     public void add(Literal subject) throws IOException {

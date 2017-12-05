@@ -1,70 +1,70 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLongAtIndexInLongBuffers;
-
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.apache.orc.TypeDescription;
 
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
-
-import sib.swiss.swissprot.sparql.ro.RoNamespaces;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
-import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
+
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
-import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
-public class IriLiteralList extends RoResourceRoValueList {
+public class IriLiteralList extends RoResourceRoValueList<RoIri, RoLiteral> {
 
-    public IriLiteralList(File file, RoIri predicate,
-            RoDictionaries dictionaries) throws IOException {
-        super(file, predicate, dictionaries);
+    public IriLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
+        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
     }
 
     @Override
     public Iterator<Statement> iterator() {
-        return new IriLiteralListIterator();
+        return new IriLiteralListIterator(getSchema());
     }
 
-    public static class Builder extends AbstractBuilder {
+    @Override
+    protected RoIri getSubject(VectorizedRowBatch batch, int index) {
+        return new RoIri(((LongColumnVector) batch.cols[0]).vector[index], dictionaries.getIriDict());
+    }
+
+    @Override
+    protected RoLiteral getObject(VectorizedRowBatch batch, int index) {
+        return new RoSimpleLiteral(((LongColumnVector) batch.cols[1]).vector[index], dictionaries.getLiteralDict());
+    }
+
+    private static TypeDescription getSchema() {
+        return TypeDescription
+                .createStruct()
+                .addField(SUBJECT, TypeDescription.createLong())
+                .addField(OBJECT, TypeDescription.createLong());
+    }
+
+    public static class Builder extends AbstractBuilder<RoIri, RoLiteral> {
 
         public Builder(File file, RoIri predicate,
-                RoDictionaries dictionaries)
+                RoDictionaries dictionaries, Configuration configuration)
                 throws IOException {
-            super(file, predicate, dictionaries);
+            super(file, predicate, dictionaries, configuration, IriLiteralList::getSchema);
         }
 
         public IriLiteralList build() throws IOException {
             save();
-            return new IriLiteralList(file, predicate, dictionaries);
+            return new IriLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
         }
+
     }
 
-    private class IriLiteralListIterator implements Iterator<Statement> {
+    private class IriLiteralListIterator extends RoResourceValueListIterator {
 
-        private int at = 0;
-
-        @Override
-        public boolean hasNext() {
-            return at < numberOfTriplesInList;
-        }
-
-        @Override
-        public Statement next() {
-            final RoResource graph = findGraphForTriple(at);
-            long subjectId = getLongAtIndexInLongBuffers(at++, triples);
-            long objectId = getLongAtIndexInLongBuffers(at++, triples);
-            return new RoContextStatement(new RoIri(subjectId, dictionaries.getIriDict()),
-                    predicate, new RoSimpleLiteral(objectId, dictionaries.getLiteralDict()), graph);
-
+        IriLiteralListIterator(TypeDescription schema) {
+            super(schema);
         }
     }
 }

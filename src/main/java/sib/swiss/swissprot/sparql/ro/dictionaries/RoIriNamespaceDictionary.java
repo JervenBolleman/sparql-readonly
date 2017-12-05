@@ -13,7 +13,7 @@ public interface RoIriNamespaceDictionary {
 
 	public String getNamespace();
 
-	public int getNamespaceId();
+	public long getNamespaceId();
 
 	public Optional<RoIri> find(IRI predicate);
 
