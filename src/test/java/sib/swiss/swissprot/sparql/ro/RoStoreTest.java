@@ -11,13 +11,16 @@ import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Statement;
+import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.SailException;
+import org.junit.After;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.Rule;
@@ -43,9 +46,13 @@ public class RoStoreTest {
         dir = folder.newFolder("readonlystore").toPath();
     }
 
+    @After
+    public void after() throws Exception {
+        folder.delete();
+    }
+
     @Test
     public void basicConfigLoad() {
-
         RoStoreFactory fact = new RoStoreFactory();
         final RoConfig config = fact.getConfig();
         config.setFile(dir.toString());
@@ -68,6 +75,9 @@ public class RoStoreTest {
         writer.handleStatement(s3);
         final Statement s4 = VF.createStatement(SUBJECT, PREDICATE, PREDICATE);
         writer.handleStatement(s4);
+        final Statement s5 = VF.createStatement(VF.createIRI("https://www.wildflower.org/image_archive/640x480/TRG/"), PREDICATE, PREDICATE);
+        writer.handleStatement(s5);
+
         writer.endRDF();
 
         RoStoreFactory fact = new RoStoreFactory();
@@ -79,6 +89,7 @@ public class RoStoreTest {
         assertNotNull(store);
 
         CloseableIteration<? extends Statement, SailException> statements = store.getConnection().getStatements(null, PREDICATE, null, true);
+        assertEquals(5, store.getConnection().size());
         assertTrue(statements.hasNext());
         Statement next = statements.next();
 
@@ -89,12 +100,44 @@ public class RoStoreTest {
 
         next = statements.next();
         assertEquals(PREDICATE, next.getPredicate());
+        assertEquals(s5.getSubject(), next.getSubject());
+        assertEquals(s5.getObject(), next.getObject());
+        
+        next = statements.next();
+        assertEquals(PREDICATE, next.getPredicate());
         assertEquals(SUBJECT, next.getSubject());
-        assertEquals(OBJECT, next.getObject());
+        final Value o2 = next.getObject();
+        assertEquals(o2, o2);
+        assertTrue(o2.equals(OBJECT2));
 
         assertTrue(statements.hasNext());
         next = statements.next();
+        assertEquals(PREDICATE, next.getPredicate());
+        assertEquals(SUBJECT, next.getSubject());
+        final Value o3 = next.getObject();
+        assertEquals(o3, o3);
+        ((Literal)o3).getDatatype();
+        assertTrue(o3.equals(OBJECT3));
 
-        assertEquals(4, store.getConnection().size());
+        assertTrue(statements.hasNext());
+        next = statements.next();
+        assertEquals(PREDICATE, next.getPredicate());
+        assertEquals(SUBJECT, next.getSubject());
+        final Value o1 = next.getObject();
+        assertEquals(o1, o1);
+        assertTrue(o1.equals(OBJECT));
+        
+        assertFalse(statements.hasNext());
+    }
+
+    @Test
+    public void taxonomyTripleLoad() throws IOException {
+        RoStoreFactory fact = new RoStoreFactory();
+        final RoConfig config = fact.getConfig();
+        config.setFile(dir.toString());
+        RoStore store = fact.getSail(config);
+        store.initialize();
+        store.load(new File("test_data", "taxonomy.rdf"), new File("test_data", "taxonomy-hierarchy.rdf"));
+        assertEquals(40_000_000, store.getConnection().size());
     }
 }

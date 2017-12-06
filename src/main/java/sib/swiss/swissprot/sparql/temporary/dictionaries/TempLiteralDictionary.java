@@ -1,5 +1,6 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
+import com.sun.istack.logging.Logger;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -26,6 +27,7 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.DATATYPE_ID;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LABEL;
@@ -41,7 +43,7 @@ public class TempLiteralDictionary extends TempDictionary {
 
     public void add(Literal subject) throws IOException {
         final IRI namespace = subject.getDatatype();
-        if (namespace == XMLSchema.BOOLEAN || namespace == XMLSchema.INT) {
+        if (namespace.equals(XMLSchema.BOOLEAN) || namespace.equals(XMLSchema.INT)) {
             return;
         }
 
@@ -78,9 +80,9 @@ public class TempLiteralDictionary extends TempDictionary {
     }
 
     public RoLiteralDict load() throws IOException {
-        Configuration conf = new Configuration();
         TypeDescription schema;
         schema = TypeDescription.createStruct()
+                .addField(RoDictionary.ID, TypeDescription.createLong())
                 .addField(LABEL, TypeDescription.createString())
                 .addField(DATATYPE_ID, TypeDescription.createLong())
                 .addField(RoLiteralDict.LANGUAGE, TypeDescription.createString());
@@ -95,19 +97,17 @@ public class TempLiteralDictionary extends TempDictionary {
                         .setSchema(schema)
                         .compress(CompressionKind.LZ4))) {
 
-            BytesColumnVector labelsCol = (BytesColumnVector) batch.cols[0];
-            LongColumnVector datatypesCol = (LongColumnVector) batch.cols[1];
-            BytesColumnVector languagesCol = (BytesColumnVector) batch.cols[2];
-            writeLanguageStrings(batch, writer, labelsCol, datatypesCol, languagesCol);
+            long index = writeLanguageStrings(batch, writer);
 
-            writeDatatypesStrings(batch, writer, labelsCol, datatypesCol, languagesCol);
+            writeDatatypesStrings(batch, writer, index);
         }
         Reader reader = OrcFile.createReader(path, OrcFile.readerOptions(conf));
         return new RoLiteralDict(reader);
     }
 
-    private void writeLanguageStrings(VectorizedRowBatch batch, final Writer writer, BytesColumnVector labelsCol, LongColumnVector datatypesCol, BytesColumnVector languagesCol) throws IOException {
+    private long writeLanguageStrings(VectorizedRowBatch batch, final Writer writer) throws IOException {
         int datatypeCode = RoLiteralDict.datatypeCode(XMLSchema.LANGUAGE);
+        long index = 0;
         for (String lang : languages.keySet()) {
             String languageTag = lang.substring(5);
             try (BufferedReader br = Files.newBufferedReader(new File(out, lang).toPath())) {
@@ -118,25 +118,38 @@ public class TempLiteralDictionary extends TempDictionary {
                         .distinct()
                         .iterator();
                 while (iterator.hasNext()) {
-
+                    LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
+                    BytesColumnVector labelsCol = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+                    LongColumnVector datatypesCol = (LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL];
+                    BytesColumnVector languagesCol = (BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL];
                     if (batch.size == batch.getMaxSize()) {
+                        datatypesCol.fill(datatypeCode);
                         writer.addRowBatch(batch);
                         batch.reset();
                     }
+                    idCol.vector[batch.size] = index++;
                     labelsCol.setVal(batch.size, iterator.next().getBytes());
-                    datatypesCol.vector[batch.size] = datatypeCode;
+                   
                     languagesCol.setVal(batch.size, languageTag.getBytes());
                     batch.size++;
                 }
+                ((LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL]).fill(datatypeCode);
+                writer.addRowBatch(batch);
+                batch.reset();
+            }
+            if (!new File(out, lang).delete()) {
+                Logger.getLogger(this.getClass()).warning("Can't delete lang temp file " + lang);
             }
         }
+        return index;
     }
 
-    private void writeDatatypesStrings(VectorizedRowBatch batch, Writer writer, BytesColumnVector labelsCol, LongColumnVector datatypesCol, BytesColumnVector languagesCol) throws IOException {
-        for (IRI lang : datatypes.keySet()) {
+    private void writeDatatypesStrings(VectorizedRowBatch batch, Writer writer, long index) throws IOException {
+        for (IRI datatype : datatypes.keySet()) {
 
-            int datatypeCode = RoLiteralDict.datatypeCode(lang);
-            try (BufferedReader br = Files.newBufferedReader(new File(out, FileNameEncoderFunctions.encodeIRI(lang)).toPath())) {
+            int datatypeCode = RoLiteralDict.datatypeCode(datatype);
+            File tempFile = new File(out, FileNameEncoderFunctions.encodeIRI(datatype));
+            try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
 
                 //br returns as stream and convert it into a List
                 Iterator<String> iterator = br.lines()
@@ -144,20 +157,30 @@ public class TempLiteralDictionary extends TempDictionary {
                         .distinct()
                         .iterator();
                 while (iterator.hasNext()) {
-
+                    LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
+                    BytesColumnVector labelsCol = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+                    LongColumnVector datatypesCol = (LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL];
+                    BytesColumnVector languagesCol = (BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL];
                     if (batch.size == batch.getMaxSize()) {
+                        datatypesCol.fill(datatypeCode);
+                        languagesCol.fillWithNulls();
                         writer.addRowBatch(batch);
                         batch.reset();
                     }
+                    idCol.vector[batch.size] = index++;
                     labelsCol.setVal(batch.size, iterator.next().getBytes());
-                    datatypesCol.vector[batch.size] = datatypeCode;
-                    languagesCol.setVal(batch.size, new byte[]{});
                     batch.size++;
                 }
-                if (batch.size != 0) {
-                    writer.addRowBatch(batch);
-                }
+                ((LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL]).fill(datatypeCode);
+                ((BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL]).fillWithNulls();
+                writer.addRowBatch(batch);
+                batch.reset();
             }
+
+            if (!tempFile.delete()) {
+                Logger.getLogger(this.getClass()).warning("Can't delete datatype temp file " + datatype);
+            }
+           
         }
     }
 }

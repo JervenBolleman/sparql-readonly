@@ -1,10 +1,14 @@
 package sib.swiss.swissprot.sparql.ro;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.rdf4j.model.BNode;
@@ -19,6 +23,7 @@ import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
 import sib.swiss.swissprot.sparql.ro.RoPredicateStore.Builder;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
@@ -29,29 +34,41 @@ import sib.swiss.swissprot.sparql.ro.values.RoValue;
 public class PredicateListBuildingHandler implements RDFHandler {
 
     private final RoStore roStore;
-    private final Map<RoIri, RoPredicateStore.Builder> builders = new HashMap<>();
+    private final Map<RoIri, RoPredicateStore.Builder> builders;
     private final File predicateListsDir;
     private final RoDictionaries dictionaries;
     private final AtomicLong bnodeCounter;
-    private Map<String, Long> bnodeTempDict;
-            
+    private final Map<String, Long> bnodeTempDict = new HashMap<>();
+    private final Cache<IRI, RoIri> iriCache;
+
     public PredicateListBuildingHandler(RoStore roStore,
             RoDictionaries dictionaries,
-            File predicateListsDir, AtomicLong bnodeCounter) {
+            File predicateListsDir, AtomicLong bnodeCounter, Map<RoIri, RoPredicateStore.Builder> builders) {
         this.roStore = roStore;
         this.dictionaries = dictionaries;
         this.predicateListsDir = predicateListsDir;
         this.bnodeCounter = bnodeCounter;
+        this.iriCache = Caffeine.newBuilder()
+                .maximumSize(10_000)
+                .build(key -> {
+                    Optional<RoIri> found = dictionaries.getIriDict().find(key);
+                    if (found.isPresent()) {
+                        return found.get();
+                    } else {
+                        return null;
+                    }
+                });
+        this.builders = builders;
     }
 
     @Override
     public void startRDF() throws RDFHandlerException {
-        bnodeTempDict = new HashMap<>();
+
     }
 
     @Override
     public void endRDF() throws RDFHandlerException {
-        bnodeTempDict.clear();
+
     }
 
     @Override
@@ -63,17 +80,9 @@ public class PredicateListBuildingHandler implements RDFHandler {
     @Override
     public void handleStatement(Statement st) throws RDFHandlerException {
         try {
-            Optional<RoIri> found = dictionaries.getIriDict().find(st.getPredicate());
-            if (!found.isPresent()) {
-                throw new RDFHandlerException("all IRIs should be in the iriDict" + st.getPredicate().stringValue());
-            }
-            final RoIri predicate = found.get();
-            Builder builder = builders.get(predicate);
-            if (builder == null) {
-                builder = new RoPredicateStore.Builder(RoPredicateStore.initDirectory(predicateListsDir, predicate),
-                        predicate, dictionaries, roStore.conf);
-                builders.put(predicate, builder);
-            }
+            RoIri predicate = findPredicate(st);
+
+            Builder builder = getOrInitBuilder(predicate);
             RoResource subject = find(st.getSubject()).get();
             RoValue object = find(st.getObject()).get();
             if (st.getContext() != null) {
@@ -83,9 +92,36 @@ public class PredicateListBuildingHandler implements RDFHandler {
                 builder.add(subject, object, null);
             }
         } catch (IOException e) {
-            throw new RDFHandlerException(e);
+            throw new RDFHandlerException(st.toString(), e);
         }
 
+    }
+
+    public RoIri findPredicate(Statement st) {
+        final IRI rawPredicate = st.getPredicate();
+        RoIri predicate = iriCache.get(rawPredicate, (r) -> {
+            Optional<RoIri> found = dictionaries.getIriDict().find(r);
+            if (!found.isPresent()) {
+                throw new RDFHandlerException("all IRIs should be in the iriDict" + st.getPredicate().stringValue());
+            }
+            return found.get();
+        });
+        return predicate;
+    }
+
+    public Builder getOrInitBuilder(RoIri predicate) throws IOException {
+        Builder builder = builders.get(predicate);
+        if (builder == null) {
+            synchronized (builders) {
+                builder = builders.get(predicate);
+                if (builder == null) {
+                    builder = new RoPredicateStore.Builder(RoPredicateStore.initDirectory(predicateListsDir, predicate),
+                            predicate, dictionaries, roStore.conf);
+                    builders.put(predicate, builder);
+                }
+            }
+        }
+        return builder;
     }
 
     private Optional<? extends RoResource> find(Resource subject) {
@@ -93,15 +129,14 @@ public class PredicateListBuildingHandler implements RDFHandler {
             return dictionaries.getIriDict().find((IRI) subject);
         } else if (subject instanceof BNode) {
             String id = ((BNode) subject).getID();
-            if (bnodeTempDict.containsKey(id))
+            if (bnodeTempDict.containsKey(id)) {
                 return Optional.of(new RoBnode(bnodeTempDict.get(id)));
-            else
-            {
+            } else {
                 long roid = bnodeCounter.incrementAndGet();
                 bnodeTempDict.put(id, roid);
                 return Optional.of(new RoBnode(roid));
             }
-            
+
         } else {
             return Optional.empty();
         }
@@ -131,11 +166,4 @@ public class PredicateListBuildingHandler implements RDFHandler {
         // TODO Auto-generated method stub
 
     }
-
-    void build() throws IOException {
-        for (Builder builder : builders.values()) {
-            roStore.addPredicateStore(builder.build());
-        }
-    }
-
 }

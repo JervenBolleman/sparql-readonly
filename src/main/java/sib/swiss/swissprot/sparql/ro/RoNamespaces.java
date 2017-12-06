@@ -46,6 +46,15 @@ public class RoNamespaces implements Iterable<RoNamespace> {
         return Optional.empty();
     }
 
+    public Optional<RoNamespace> find(String namespace) {
+        for (RoNamespace n : namespaces) {
+            if (n.getName().equals(namespace)) {
+                return Optional.of(n);
+            }
+        }
+        return Optional.empty();
+    }
+
     public void add(RoNamespace value) {
         namespaces.add(value);
     }
@@ -70,13 +79,15 @@ public class RoNamespaces implements Iterable<RoNamespace> {
 
     public RoNamespace getFromId(long id) {
 
-        int intId = (int) (id >> 32);
+        int intId = (int) (id >> (BITS_IN_A_LONG - BITS_FOR_NAMESPACES));
         return namespaces.stream()
                 .skip(intId)
                 .findFirst()
                 .get();
 
     }
+    private static final int BITS_IN_A_LONG = 64;
+    public static final int BITS_FOR_NAMESPACES = 32;
 
     static RoNamespace fromSavedString(String s, int i) {
         int firstColon = s.indexOf(':');
@@ -100,4 +111,5 @@ public class RoNamespaces implements Iterable<RoNamespace> {
     public Stream<RoNamespace> stream() {
         return namespaces.stream();
     }
+
 }

@@ -2,6 +2,7 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -30,17 +31,20 @@ public class IriIriList extends RoResourceRoValueList<RoIri, RoIri> {
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0) {
+            Collections.emptyIterator();
+        }
         return new IriIriListIterator(getSchema());
     }
 
     @Override
     protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[0]).vector[index], dictionaries.getIriDict());
+        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
     }
 
     @Override
     protected RoIri getObject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[1]).vector[index], dictionaries.getIriDict());
+        return new RoIri(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getIriDict());
     }
 
     private static TypeDescription getSchema() {

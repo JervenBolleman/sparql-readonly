@@ -4,6 +4,7 @@ import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLon
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -34,12 +35,12 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
 
     @Override
     protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[0]).vector[index], dictionaries.getIriDict());
+        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
     }
 
     @Override
     protected RoBooleanLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoBooleanLiteral(((LongColumnVector) batch.cols[1]).vector[index] == 1L);
+        return new RoBooleanLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index] == 1L);
     }
 
     private static TypeDescription getSchema() {
@@ -51,6 +52,9 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0) {
+            Collections.emptyIterator();
+        }
         return new IriBooleanListIterator(getSchema());
     }
 

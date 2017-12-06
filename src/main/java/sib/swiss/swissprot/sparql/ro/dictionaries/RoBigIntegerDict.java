@@ -6,7 +6,6 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -18,7 +17,6 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
-import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 
 public class RoBigIntegerDict
         extends RoDictionary<RoBigIntegerLiteral, IntegerLiteral> {

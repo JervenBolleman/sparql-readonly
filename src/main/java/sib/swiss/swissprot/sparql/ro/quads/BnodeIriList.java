@@ -1,9 +1,8 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLongAtIndexInLongBuffers;
-
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -16,10 +15,7 @@ import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
-import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
-import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
-import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
 
@@ -33,12 +29,12 @@ public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
 
     @Override
     protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[0]).vector[index]);
+        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
     }
 
     @Override
     protected RoIri getObject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[1]).vector[index], dictionaries.getIriDict());
+        return new RoIri(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getIriDict());
     }
 
     private static TypeDescription getSchema() {
@@ -70,6 +66,9 @@ public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0) {
+            Collections.emptyIterator();
+        }
         return new BnodeIriListIterator(getSchema());
     }
 

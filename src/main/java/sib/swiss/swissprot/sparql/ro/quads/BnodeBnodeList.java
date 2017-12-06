@@ -2,6 +2,7 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -31,12 +32,12 @@ public class BnodeBnodeList extends RoResourceRoValueList<RoBnode, RoBnode> {
 
     @Override
     protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[0]).vector[index]);
+        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
     }
 
     @Override
     protected RoBnode getObject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[1]).vector[index]);
+        return new RoBnode(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index]);
     }
 
     private static TypeDescription getSchema() {
@@ -68,6 +69,8 @@ public class BnodeBnodeList extends RoResourceRoValueList<RoBnode, RoBnode> {
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0)
+            Collections.emptyIterator();
         return new BnodeBnodeListIterator(getSchema());
     }
 

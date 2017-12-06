@@ -36,7 +36,6 @@ import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
-import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
@@ -44,6 +43,8 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
     protected static final String SUBJECT = "subject";
     protected static final String OBJECT = "object";
+    protected static final int SUBECT_COL = 0;
+    protected static final int OBJECT_COL = 1;
     protected final Map<RoIri, RoaringBitmap> iriGraphsMap;
     protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap;
     protected final RoIri predicate;
@@ -67,7 +68,12 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         this.predicate = predicate;
         this.iriGraphsMap = iriGraphsMap;
         this.bNodeGraphsMap = bNodeGraphsMap;
-        this.triples = OrcFile.createReader(new Path(dir.getAbsolutePath(), "triples"), OrcFile.readerOptions(conf));
+        if (!dir.exists()) {
+            dir.createNewFile();
+        }
+
+        final Path path = new Path(dir.getParent(), dir.getName());
+        this.triples = OrcFile.createReader(path, OrcFile.readerOptions(conf));
         this.dictionaries = dictionaries;
     }
 
@@ -172,7 +178,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         protected long numberOfTriplesInList;
         protected final RoDictionaries dictionaries;
         protected final Configuration configuration;
-        private VectorizedRowBatch batch;
+        private final VectorizedRowBatch batch;
+        private static final int OBJECT_COL = 1;
+        private static final int SUBJECT_COL = 0;
 
         protected AbstractBuilder(File file, RoIri predicate,
                 RoDictionaries dictionaries, Configuration configuration, Supplier<TypeDescription> schemaF)
@@ -282,12 +290,12 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         }
 
         protected final void addSubject(VectorizedRowBatch batch, S subject, long numberOfTriplesInList1) {
-            LongColumnVector col = (LongColumnVector) batch.cols[0];
+            LongColumnVector col = (LongColumnVector) batch.cols[SUBJECT_COL];
             col.vector[batch.size] = subject.getLongId();
         }
 
         protected void addObject(VectorizedRowBatch batch, O object, long numberOfTriplesInList1) {
-            LongColumnVector col = (LongColumnVector) batch.cols[0];
+            LongColumnVector col = (LongColumnVector) batch.cols[OBJECT_COL];
             col.vector[batch.size++] = object.getLongId();
         }
     }
@@ -325,7 +333,11 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         @Override
         public boolean hasNext() {
+
             try {
+                if (batch.size == 0) {
+                    rows.nextBatch(batch);
+                }
                 if (batch != null) {
                     return inbatch < batch.count();
                 }

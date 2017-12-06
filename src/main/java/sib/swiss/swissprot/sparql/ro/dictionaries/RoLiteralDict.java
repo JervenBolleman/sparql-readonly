@@ -46,6 +46,9 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
         XMLSchema.UNSIGNED_LONG, XMLSchema.UNSIGNED_SHORT,
         XMLSchema.YEARMONTHDURATION};
 
+    public static final int DATATYPE_COL = RoDictionary.VALUE_COL + 1;
+    public static final int LANGUAGE_COL = DATATYPE_COL + 1;
+
     public RoLiteralDict(Reader reader) {
         super(reader);
     }
@@ -53,19 +56,47 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     @Override
     public Optional<RoLiteral> find(Literal value) {
         try {
-            final Reader.Options options = new Reader.Options();
-            SearchArgument equals = SearchArgumentFactory.newBuilder()
-                    .equals(LABEL, PredicateLeaf.Type.STRING, value.stringValue())
-                    .equals(DATATYPE_ID, PredicateLeaf.Type.LONG, (long) datatypeCode(value.getDatatype()))
-                    .equals(LANGUAGE, PredicateLeaf.Type.STRING, value.getLanguage().orElse(""))
-                    .build();
+            IRI dt = value.getDatatype();
+            int dtIndex = -1;
+            SearchArgument.Builder builder = SearchArgumentFactory.newBuilder()
+                    .equals(LABEL, PredicateLeaf.Type.STRING, value.stringValue());
+            if (dt != null) {
+                dtIndex = datatypeCode(value.getDatatype());
+                builder = builder.equals(DATATYPE_ID, PredicateLeaf.Type.LONG, (long) dtIndex)
+                        .isNull(LANGUAGE, PredicateLeaf.Type.STRING);
 
-            options.searchArgument(equals, new String[]{LABEL, DATATYPE_ID, LANGUAGE});
-            RecordReader rows = reader.rows(options);
-            long id = rows.getRowNumber();
-            if (id >= 0) {
-                return Optional.of(new RoSimpleLiteral(id, this));
             } else {
+                builder = builder
+                        .equals(LANGUAGE, PredicateLeaf.Type.STRING, value.getLanguage().orElse(""))
+                        .isNull(DATATYPE_ID, PredicateLeaf.Type.LONG);
+            }
+
+            final Reader.Options options = new Reader.Options()
+                    .include(new boolean[]{true, true, true, true, true})
+                    .searchArgument(builder.build(), new String[]{LABEL, DATATYPE_ID, LANGUAGE});
+
+            try (RecordReader rows = reader.rows(options)) {
+                VectorizedRowBatch batch = schema.createRowBatch();
+                boolean nextBatch = rows.nextBatch(batch);
+                while (nextBatch) {
+                    final LongColumnVector id = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
+                    final BytesColumnVector bcv = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+
+                    for (int i = 0; i < batch.size; i++) {
+                        if (dt != null) {
+                            final LongColumnVector dtId = (LongColumnVector) batch.cols[DATATYPE_COL];
+                            if (dtId.vector[i] == dtIndex && new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())) {
+                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
+                            }
+                        } else {
+                            final BytesColumnVector lang = (BytesColumnVector) batch.cols[LANGUAGE_COL];
+                            if (new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())
+                                    && new String(lang.vector[i], lang.start[i], lang.length[i]).equals(value.getLanguage().get())) {
+                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
+                            }
+                        }
+                    }
+                }
                 return Optional.empty();
             }
         } catch (IOException ex) {
@@ -75,13 +106,12 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public String stringValue(long id) {
-        try {
-            RecordReader rows = reader.rows();
+        try (RecordReader rows = reader.rows()) {
             rows.seekToRow(id);
             VectorizedRowBatch batch = schema.createRowBatch(1);
             final boolean nextBatch = rows.nextBatch(batch);
             assert nextBatch;
-            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[0];
+            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
             return stringVector.toString(0);
         } catch (IOException ex) {
             Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
@@ -90,13 +120,12 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public IRI dataType(long id) {
-        try {
-            RecordReader rows = reader.rows();
+        try (RecordReader rows = reader.rows()) {
             rows.seekToRow(id);
             VectorizedRowBatch batch = schema.createRowBatch(1);
             final boolean nextBatch = rows.nextBatch(batch);
             assert nextBatch;
-            LongColumnVector stringVector = (LongColumnVector) batch.cols[1];
+            LongColumnVector stringVector = (LongColumnVector) batch.cols[DATATYPE_COL];
             long did = stringVector.vector[0];
             return DATA_TYPES[(int) did];
         } catch (IOException ex) {
@@ -110,14 +139,16 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public Optional<String> language(long id) {
-        try {
-            RecordReader rows = reader.rows();
+        try (RecordReader rows = reader.rows()) {
             rows.seekToRow(id);
             VectorizedRowBatch batch = schema.createRowBatch(1);
             final boolean nextBatch = rows.nextBatch(batch);
             assert nextBatch;
-            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[2];
-            String s = stringVector.toString(0);
+            BytesColumnVector bcv = (BytesColumnVector) batch.cols[LANGUAGE_COL];
+            if (bcv.vector[0] == null || bcv.length[0] == 0) {
+                return Optional.empty();
+            }
+            String s = new String(bcv.vector[0], bcv.start[0], bcv.length[0]);
             if (s.isEmpty()) {
                 return Optional.empty();
             } else {

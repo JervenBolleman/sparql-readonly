@@ -6,12 +6,12 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
-import java.io.StringReader;
 import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
+import org.junit.After;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import org.junit.Rule;
@@ -51,6 +51,11 @@ public class RoIriDictionaryTest {
         assertEquals(RDF.ALT, foundAlt.get());
     }
 
+    @After
+    public void after() throws Exception {
+        folder.delete();
+    }
+
     @Test
     public void testMany() throws IOException {
         RoNamespaces namespaces = new RoNamespaces();
@@ -68,6 +73,30 @@ public class RoIriDictionaryTest {
             assertTrue(foundType.isPresent());
             assertEquals(RDF.NAMESPACE, foundType.get().getNamespace());
             assertEquals(test.getLocalName(), foundType.get().getLocalName());
+        }
+    }
+
+    @Test
+    public void testManyNamespaces() throws IOException {
+        RoNamespaces namespaces = new RoNamespaces();
+        namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
+
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), new Configuration());
+        for (int j = 0; j < 4_000; j++) {
+            for (int i = 0; i < 50; i++) {
+                temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/" + j + '/', i + "aaaa"));
+            }
+        }
+
+        RoIriDictionary roIriDictionary = temp.load();
+        for (int j = 0; j < 4_000; j++) {
+            for (int i = 0; i < 50; i++) {
+                final IRI test = SimpleValueFactory.getInstance().createIRI("http://example.org/" + j + '/', i + "aaaa");
+                final Optional<RoIri> foundType = roIriDictionary.find(test);
+                assertTrue(foundType.isPresent());
+                assertEquals(test.getNamespace(), foundType.get().getNamespace());
+                assertEquals(test.getLocalName(), foundType.get().getLocalName());
+            }
         }
     }
 }

@@ -29,7 +29,7 @@ public class RoIri implements IRI, RoResource {
     @Override
     public String getNamespace() {
         final RoNamespaces namespaces = dict.getNamespaces();
-        return namespaces.getFromId(id >>> 32).getName();
+        return namespaces.getFromId(id).getName();
     }
 
     @Override
@@ -61,6 +61,11 @@ public class RoIri implements IRI, RoResource {
         } else {
             return super.equals(object);
         }
+    }
+
+    @Override
+    public int hashCode() {
+        return toString().hashCode();
     }
 
     @Override

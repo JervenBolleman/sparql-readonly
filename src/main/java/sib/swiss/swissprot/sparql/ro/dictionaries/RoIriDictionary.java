@@ -18,11 +18,12 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 public class RoIriDictionary {
 
     public static final String IRI_VALUE = "iri_value";
+    private static final int BITS_IN_A_LONG = Long.BYTES*8;
     private final Map<Long, RoIriNamespaceDictionary> idToIriDictionaryMap;
     private final RoNamespaces namespaces;
 
     public Optional<String> getLocalNameFromId(long id) throws IOException {
-        long namespaceId = (id >>> 32);
+        long namespaceId = (id >>> (BITS_IN_A_LONG-RoNamespaces.BITS_FOR_NAMESPACES));
         RoIriNamespaceDictionary namespace = idToIriDictionaryMap
                 .get(namespaceId);
         return namespace.getLocalNameFromId(id);
@@ -43,7 +44,12 @@ public class RoIriDictionary {
     }
 
     public Optional<RoIri> find(IRI iri) {
+
         Optional<RoNamespace> has = namespaces.find(iri);
+        if (!has.isPresent() && iri.getLocalName().isEmpty()) {
+            final String namespace = iri.getNamespace().substring(0, iri.getNamespace().lastIndexOf("/", iri.getNamespace().length() - 2) + 1);
+            has = namespaces.find(namespace);
+        }
         if (!has.isPresent()) {
             return Optional.empty();
         }

@@ -8,6 +8,7 @@ import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -21,6 +22,7 @@ import org.eclipse.rdf4j.rio.RDFHandlerException;
 import org.eclipse.rdf4j.rio.RDFParseException;
 import org.eclipse.rdf4j.rio.RDFParser;
 import org.eclipse.rdf4j.rio.Rio;
+import org.eclipse.rdf4j.rio.UnsupportedRDFormatException;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.helpers.AbstractSail;
@@ -162,13 +164,23 @@ public class RoStore extends AbstractSail {
                 parser.parse(new FileReader(file), "");
             }
         }
-        AtomicLong bnodeCounter = new AtomicLong();
+
         iriDict = tempIriDictionary.load();
         literalDict = tempLitalDictionary.load();
         integerDict = tempIntegerDictionary.load();
-        final PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
-                this, new RoDictionaries(iriDict, literalDict, integerDict),
-                subDataDirs.get(RoDirectories.PREDICATE_LISTS), bnodeCounter);
+
+        ConcurrentHashMap<RoIri, RoPredicateStore.Builder> builders = new ConcurrentHashMap<>();
+        parseFiles(files, builders);
+
+        for (RoPredicateStore.Builder builder : builders.values()) {
+            this.addPredicateStore(builder.build());
+        }
+
+        reinitPredicateStores();
+    }
+
+    public void parseFiles(File[] files, ConcurrentHashMap<RoIri, RoPredicateStore.Builder> builders) throws RDFHandlerException, IOException, RDFParseException, UnsupportedRDFormatException {
+        AtomicLong bnodeCounter = new AtomicLong();
         for (File file : files) {
             final Optional<RDFFormat> op = Rio
                     .getParserFormatForFileName(file.getName());
@@ -176,12 +188,13 @@ public class RoStore extends AbstractSail {
                 final RDFFormat format = op.get();
                 final RDFParser parser = Rio.createParser(format, vf);
 
+                PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
+                        this, new RoDictionaries(iriDict, literalDict, integerDict),
+                        subDataDirs.get(RoDirectories.PREDICATE_LISTS), bnodeCounter, builders);
                 parser.setRDFHandler(handler);
                 parser.parse(new FileReader(file), "");
             }
         }
-        handler.build();
-        reinitPredicateStores();
     }
 
     private void reinitPredicateStores()

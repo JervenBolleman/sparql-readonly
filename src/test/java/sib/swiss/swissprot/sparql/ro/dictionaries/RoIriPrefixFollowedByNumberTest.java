@@ -17,6 +17,7 @@ import org.apache.hadoop.conf.Configuration;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
+import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -75,6 +76,11 @@ public class RoIriPrefixFollowedByNumberTest {
         assertTrue(values.hasNext());
         next = values.next();
         assertEquals(ten, next.stringValue());
+    }
+
+    @After
+    public void after() throws Exception {
+        folder.delete();
     }
 
     @Test

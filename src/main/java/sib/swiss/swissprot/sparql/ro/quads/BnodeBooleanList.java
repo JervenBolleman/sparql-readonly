@@ -4,6 +4,7 @@ import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLon
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -35,12 +36,12 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
 
     @Override
     protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[0]).vector[index]);
+        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
     }
 
     @Override
     protected RoBooleanLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoBooleanLiteral(((LongColumnVector) batch.cols[1]).vector[index] == 1L);
+        return new RoBooleanLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index] == 1L);
     }
 
     private static TypeDescription getSchema() {
@@ -52,6 +53,9 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0) {
+            Collections.emptyIterator();
+        }
         return new BnodeBooleanListIterator(getSchema());
     }
 
@@ -78,7 +82,7 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
 
         @Override
         public Statement statement(RoBnode subject, RoIri predicate, RoBooleanLiteral object, RoResource graph) {
-            if (graph instanceof BNode) {
+            if (graph == null || graph instanceof BNode) {
                 return new RoContextStatement(
                         subject, predicate,
                         object, graph);

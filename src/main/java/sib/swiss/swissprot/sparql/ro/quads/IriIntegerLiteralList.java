@@ -2,6 +2,7 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -17,7 +18,6 @@ import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
-import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 
 public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntegerLiteral> {
 
@@ -32,12 +32,12 @@ public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntege
 
     @Override
     protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[0]).vector[index], dictionaries.getIriDict());
+        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
     }
 
     @Override
     protected RoIntegerLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoIntegerLiteral(((LongColumnVector) batch.cols[1]).vector[index]);
+        return new RoIntegerLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index]);
     }
 
     private static TypeDescription getSchema() {
@@ -49,6 +49,9 @@ public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntege
 
     @Override
     public Iterator<Statement> iterator() {
+        if (triples.getNumberOfRows() == 0) {
+            Collections.emptyIterator();
+        }
         return new IriIntegerListIterator(getSchema());
     }
 
