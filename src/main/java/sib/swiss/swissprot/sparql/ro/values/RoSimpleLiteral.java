@@ -9,11 +9,12 @@ import javax.xml.datatype.XMLGregorianCalendar;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.datatypes.XMLDatatypeUtil;
+import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 import org.eclipse.rdf4j.model.util.Literals;
 
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 
-public class RoSimpleLiteral implements RoLiteral {
+public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
 
     private static final long serialVersionUID = 1L;
     private final RoLiteralDict dict;
