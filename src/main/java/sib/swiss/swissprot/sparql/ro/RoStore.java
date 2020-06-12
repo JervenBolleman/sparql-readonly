@@ -51,6 +51,7 @@ public class RoStore extends AbstractSail {
 	public RoStore() {
 		this.federatedServiceResolver = new SPARQLServiceResolver();
 		this.conf = new Configuration();
+		this.conf.setAllowNullValueProperties(true);
 	}
 
 	@Override
@@ -115,7 +116,8 @@ public class RoStore extends AbstractSail {
 		if (!literalFile.exists()) {
 			literalFile.createNewFile();
 		}
-		Path literals = new Path(literalsDir.getAbsolutePath(), RoLiteralDict.PATH_NAME);
+		Path literals = new Path(literalsDir.getAbsolutePath(),
+				RoLiteralDict.PATH_NAME);
 		literalDict = new RoLiteralDict(
 				OrcFile.createReader(literals, OrcFile.readerOptions(conf)));
 
@@ -157,19 +159,8 @@ public class RoStore extends AbstractSail {
 		final TempIntegerDictionary tempIntegerDictionary = new TempIntegerDictionary(
 				subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES),
 				conf);
-		for (File file : files) {
-			final Optional<RDFFormat> op = Rio
-					.getParserFormatForFileName(file.getName());
-			if (op.isPresent()) {
-				final RDFFormat format = op.get();
-				final RDFParser parser = Rio.createParser(format, vf);
-
-				parser.setRDFHandler(
-						new DictionaryBuildingHandler(this, tempIriDictionary,
-								tempLitalDictionary, tempIntegerDictionary));
-				parser.parse(new FileReader(file), "");
-			}
-		}
+		parseFilesForTempDictionaries(tempLitalDictionary, tempIriDictionary,
+				tempIntegerDictionary, files);
 
 		iriDict = tempIriDictionary.load();
 		literalDict = tempLitalDictionary.load();
@@ -183,6 +174,26 @@ public class RoStore extends AbstractSail {
 		}
 
 		reinitPredicateStores();
+	}
+
+	private void parseFilesForTempDictionaries(
+			final TempLiteralDictionary tempLitalDictionary,
+			final TempIriDictionary tempIriDictionary,
+			final TempIntegerDictionary tempIntegerDictionary, File... files)
+			throws IOException, FileNotFoundException {
+		for (File file : files) {
+			final Optional<RDFFormat> op = Rio
+					.getParserFormatForFileName(file.getName());
+			if (op.isPresent()) {
+				final RDFFormat format = op.get();
+				final RDFParser parser = Rio.createParser(format, vf);
+
+				parser.setRDFHandler(
+						new DictionaryBuildingHandler(this, tempIriDictionary,
+								tempLitalDictionary, tempIntegerDictionary));
+				parser.parse(new FileReader(file), "");
+			}
+		}
 	}
 
 	public void parseFiles(File[] files,

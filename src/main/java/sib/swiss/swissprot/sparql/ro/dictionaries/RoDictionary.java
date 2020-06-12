@@ -28,6 +28,7 @@ public abstract class RoDictionary<T extends RoValue, V extends Value> {
 	}
 
 	protected String readStringAt(long offset) throws IOException {
+		reader.getNumberOfRows();
 		try (RecordReader rows = reader.rows()) {
 			rows.seekToRow(offset);
 			VectorizedRowBatch batch = schema.createRowBatch();
