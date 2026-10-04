@@ -296,7 +296,7 @@ public class TempIriDictionary extends TempDictionary {
 
     private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, File iriFile)
             throws IOException {
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(iriFile, SCHEMA)) {
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(iriFile, SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
             for (int start = 0; start < tempNodes.size(); start += BATCH_SIZE) {
                 final int size = Math.min(BATCH_SIZE, tempNodes.size() - start);
                 final long[] ids = new long[size];

@@ -63,7 +63,7 @@ public class TempIntegerDictionary extends TempDictionary {
 		}
 		File f = new File(out, "temp");
 		if (f.exists()) {
-			try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoBigIntegerDict.SCHEMA)) {
+			try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoBigIntegerDict.SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
 				writeIntegers(f, writer);
 			} catch (ClassNotFoundException ex) {
 				Logger.getLogger(TempIntegerDictionary.class.getName())

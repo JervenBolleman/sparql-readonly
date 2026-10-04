@@ -90,7 +90,7 @@ public class TempLiteralDictionary extends TempDictionary {
         if (file.exists()) {
             file.delete();
         }
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA)) {
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
             LiteralBatch batch = new LiteralBatch(writer);
             writeLanguageStrings(batch);
             writeDatatypesStrings(batch);

@@ -18,6 +18,7 @@ import dev.hardwood.schema.ColumnProjection;
 import dev.hardwood.schema.FileSchema;
 import dev.hardwood.writer.ColumnBatch;
 import dev.hardwood.writer.ParquetFileWriter;
+import dev.hardwood.writer.WriterConfig;
 
 /**
  * A read only Parquet file. A missing or zero length file is treated as a
@@ -31,6 +32,15 @@ public final class ParquetTable implements Closeable {
      * hand over every non matching row on its own.
      */
     private static final int LOOKUP_BATCH_SIZE = 4096;
+
+    /**
+     * For files read by point lookups on sorted columns. hardwood writes no
+     * page index, so statistics can only skip whole row groups: small ones
+     * let a lookup decode only the row group that can hold the value.
+     */
+    public static final WriterConfig LOOKUP_CONFIG = WriterConfig.builder()
+            .rowGroupTargetRows(LOOKUP_BATCH_SIZE)
+            .build();
 
     private final ParquetFileReader reader;
 
@@ -113,7 +123,11 @@ public final class ParquetTable implements Closeable {
         private final ParquetFileWriter writer;
 
         public Writer(File file, FileSchema schema) throws IOException {
-            this.writer = ParquetFileWriter.create(OutputFile.of(file.toPath()), schema);
+            this(file, schema, WriterConfig.defaults());
+        }
+
+        public Writer(File file, FileSchema schema, WriterConfig config) throws IOException {
+            this.writer = ParquetFileWriter.create(OutputFile.of(file.toPath()), schema, config);
         }
 
         public void writeBatch(Consumer<ColumnBatch> filler) throws IOException {
