@@ -80,10 +80,13 @@ public class PredicateListBuildingHandler implements RDFHandler {
 			RoIri predicate = findPredicate(st);
 
 			Builder builder = getOrInitBuilder(predicate);
-			RoResource subject = find(st.getSubject()).get();
-			RoValue object = find(st.getObject()).get();
+			RoResource subject = find(st.getSubject())
+					.orElseThrow(() -> notInDictionary(st.getSubject()));
+			RoValue object = find(st.getObject())
+					.orElseThrow(() -> notInDictionary(st.getObject()));
 			if (st.getContext() != null) {
-				RoResource context = find(st.getContext()).get();
+				RoResource context = find(st.getContext())
+						.orElseThrow(() -> notInDictionary(st.getContext()));
 				builder.add(subject, object, context);
 			} else {
 				builder.add(subject, object, null);
@@ -92,6 +95,11 @@ public class PredicateListBuildingHandler implements RDFHandler {
 			throw new RDFHandlerException(st.toString(), e);
 		}
 
+	}
+
+	private static RDFHandlerException notInDictionary(Value value) {
+		return new RDFHandlerException(
+				"Not in the dictionaries built in the first pass: " + value);
 	}
 
 	public RoIri findPredicate(Statement st) {

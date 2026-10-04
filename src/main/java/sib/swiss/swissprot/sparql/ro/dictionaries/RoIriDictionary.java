@@ -44,13 +44,28 @@ public class RoIriDictionary implements Closeable {
         this.namespaces = namespaces;
     }
 
-    public Optional<RoIri> find(IRI iri) {
-
-        Optional<RoNamespace> has = namespaces.find(iri);
-        if (!has.isPresent() && iri.getLocalName().isEmpty()) {
-            final String namespace = iri.getNamespace().substring(0, iri.getNamespace().lastIndexOf("/", iri.getNamespace().length() - 2) + 1);
-            has = namespaces.find(namespace);
+    /**
+     * The namespace an IRI is stored under. An IRI with an empty local name,
+     * one ending in its namespace separator, is stored one level up, with the
+     * last path segment as local name.
+     */
+    public static String storedNamespace(IRI iri) {
+        String namespace = iri.getNamespace();
+        if (iri.getLocalName().isEmpty()) {
+            namespace = namespace.substring(0, namespace.lastIndexOf("/", namespace.length() - 2) + 1);
         }
+        return namespace;
+    }
+
+    /**
+     * The local name an IRI is stored with, see {@link #storedNamespace(IRI)}.
+     */
+    public static String storedLocalName(IRI iri) {
+        return iri.stringValue().substring(storedNamespace(iri).length());
+    }
+
+    public Optional<RoIri> find(IRI iri) {
+        Optional<RoNamespace> has = namespaces.find(storedNamespace(iri));
         if (!has.isPresent()) {
             return Optional.empty();
         }

@@ -52,6 +52,24 @@ public class RoIriDictionaryTest {
         assertEquals(RDF.ALT, foundAlt.get());
     }
 
+    /**
+     * An IRI ending in '/' has an empty local name: it is stored under the
+     * namespace one level up, even when its own namespace is also in use.
+     */
+    @Test
+    public void namespaceIriNextToItsMembers() throws IOException {
+        final IRI ontology = SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/");
+        final IRI member = SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/", "9606");
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        temp.add(ontology);
+        temp.add(member);
+        temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/", "10239"));
+        temp.close();
+        RoIriDictionary roIriDictionary = temp.load();
+        assertEquals(ontology, roIriDictionary.find(ontology).get());
+        assertEquals(member, roIriDictionary.find(member).get());
+    }
+
     @Test
     public void hashCodeIsThatOfTheIriString() throws IOException {
         final IRI basic = RDF.TYPE;

@@ -128,11 +128,11 @@ public class RoIriPrefixFollowedByNumberDictionary
 
     @Override
     public Optional<RoIri> find(IRI predicate) {
-        if (predicate.getNamespace().equals(namespace.getName())) {
-            if (predicate.getLocalName().startsWith(prefix)) {
+        final String localName = RoIriDictionary.storedLocalName(predicate);
+        if (RoIriDictionary.storedNamespace(predicate).equals(namespace.getName())) {
+            if (localName.startsWith(prefix)) {
                 try {
-                    int id = Integer.valueOf(predicate.getLocalName()
-                            .substring(prefix.length()));
+                    int id = Integer.valueOf(localName.substring(prefix.length()));
                     if (bitmap.contains(id)) {
                         return Optional.of(
                                 new RoIri(nameSpacedId(id), roIriDictionary, predicate));

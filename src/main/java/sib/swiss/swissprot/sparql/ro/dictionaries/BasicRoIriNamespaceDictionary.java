@@ -50,13 +50,8 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 
 	@Override
 	public Optional<RoIri> find(IRI iri) {
-		String namespace = iri.getNamespace();
-		String localName = iri.getLocalName();
-		if (iri.getLocalName().isEmpty()) {
-			namespace = namespace.substring(0,
-					namespace.lastIndexOf("/", namespace.length() - 2) + 1);
-			localName = iri.getNamespace().substring(namespace.length());
-		}
+		String namespace = RoIriDictionary.storedNamespace(iri);
+		String localName = RoIriDictionary.storedLocalName(iri);
 		if (namespace.equals(roNamespace.getName())) {
 			return findId(FilterPredicate.eq(RoIriDictionary.IRI_VALUE, localName))
 					.map(id -> new RoIri(nameSpacedId(id), roIriDictionary, iri));

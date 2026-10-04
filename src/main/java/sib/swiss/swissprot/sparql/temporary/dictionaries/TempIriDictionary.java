@@ -144,11 +144,11 @@ public class TempIriDictionary extends TempDictionary {
             return;
         }
         iriCache.put(subject, Boolean.TRUE);
-        String namespace = realNamespace(subject);
+        String namespace = RoIriDictionary.storedNamespace(subject);
         File file = getFileForNamespace(namespace);
 
         FileOutputStream fos = getFileOutPUtStreamForFile(file);
-        String localname = ensureLocalName(subject, namespace);
+        String localname = RoIriDictionary.storedLocalName(subject);
         fos.write(localname.getBytes(StandardCharsets.UTF_8));
         fos.write('\n');
         closeEvictedFileOutputStream();
@@ -161,14 +161,6 @@ public class TempIriDictionary extends TempDictionary {
             toClose.close();
             it.remove();
         }
-    }
-
-    private static String ensureLocalName(IRI subject, String namespace) {
-        String localname = subject.getLocalName();
-        if (localname.isEmpty()) {
-            localname = subject.getNamespace().substring(namespace.length());
-        }
-        return localname;
     }
 
     private FileOutputStream getFileOutPUtStreamForFile(File file) {
@@ -197,14 +189,6 @@ public class TempIriDictionary extends TempDictionary {
 
         }
         return file;
-    }
-
-    public String realNamespace(IRI subject) {
-        String namespace = subject.getNamespace();
-        if (subject.getLocalName().isEmpty()) {
-            namespace = namespace.substring(0, namespace.lastIndexOf("/", namespace.length() - 2) + 1);
-        }
-        return namespace;
     }
 
     @Override
