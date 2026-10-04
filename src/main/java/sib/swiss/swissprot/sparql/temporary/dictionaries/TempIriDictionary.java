@@ -1,9 +1,7 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
 import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.CacheWriter;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -23,27 +21,29 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.CompressionKind;
-import org.apache.orc.OrcFile;
-import org.apache.orc.Reader;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
 
+import dev.hardwood.Hardwood;
+import dev.hardwood.metadata.LogicalType;
+import dev.hardwood.metadata.PhysicalType;
+import dev.hardwood.metadata.RepetitionType;
+import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
+
+    private static final int BATCH_SIZE = 64 * 1024;
+    private static final FileSchema SCHEMA = FileSchema.builder("iris")
+            .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
+            .addColumn(RoIriDictionary.IRI_VALUE, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
+            .build();
 
     protected static class DataDistribution {
 
@@ -52,6 +52,7 @@ public class TempIriDictionary extends TempDictionary {
         private int minLength = Integer.MAX_VALUE;
         private int maxLength = Integer.MIN_VALUE;
         private boolean allNumericAfterLongestCommonPrefix = true;
+        private boolean seenOnlyDigits = false;
 
         public String measure(String s) {
             if (s.isEmpty()) {
@@ -69,7 +70,9 @@ public class TempIriDictionary extends TempDictionary {
                         String prefix = s.substring(0, i + 1);
                         if (longestCommonPrefix == null) {
                             longestCommonPrefix = prefix;
-                            if (i == a.length - 1) {
+                            // earlier values had no prefix at all
+                            if (i == a.length - 1 || seenOnlyDigits
+                                    || !fitsInInt(s.substring(i + 1))) {
                                 hasCommonPrefix = false;
                                 allNumericAfterLongestCommonPrefix = false;
                             }
@@ -81,16 +84,35 @@ public class TempIriDictionary extends TempDictionary {
                         return s;
                     }
                 }
-            } else if (allNumericAfterLongestCommonPrefix && hasCommonPrefix
-                    && s.startsWith(longestCommonPrefix)) {
-                try {
-                    Integer.parseInt(s.substring(longestCommonPrefix.length()));
-                } catch (NumberFormatException e) {
+                seenOnlyDigits = true;
+                if (!fitsInInt(s)) {
+                    allNumericAfterLongestCommonPrefix = false;
+                    hasCommonPrefix = false;
+                }
+            } else if (allNumericAfterLongestCommonPrefix && hasCommonPrefix) {
+                if (!s.startsWith(longestCommonPrefix)) {
+                    allNumericAfterLongestCommonPrefix = false;
+                    hasCommonPrefix = false;
+                    return s;
+                }
+                if (!fitsInInt(s.substring(longestCommonPrefix.length()))) {
                     allNumericAfterLongestCommonPrefix = false;
                     hasCommonPrefix = false;
                 }
             }
             return s;
+        }
+
+        /**
+         * The numbers are stored in an int bitmap.
+         */
+        private static boolean fitsInInt(String number) {
+            try {
+                Integer.parseInt(number);
+                return true;
+            } catch (NumberFormatException e) {
+                return false;
+            }
         }
 
         public boolean allNumericWithPrefix() {
@@ -99,48 +121,22 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
-    private class ClosingCacheWriter implements CacheWriter<File, FileOutputStream> {
-
-        private final Map<File, FileOutputStream> fileFosToClose;
-
-        private ClosingCacheWriter(Map<File, FileOutputStream> fileFosToClose) {
-            this.fileFosToClose = fileFosToClose;
-
-        }
-
-        @Override
-        public void write(File key, FileOutputStream value) {
-        }
-
-        @Override
-        public void delete(File key, FileOutputStream value, RemovalCause cause) {
-            fileFosToClose.put(key, value);
-        }
-    }
     private final Map<String, File> namespacesFile = new HashMap<>();
     private final Map<File, FileOutputStream> fileFosToClose = new ConcurrentHashMap<>();
-    private final Cache<File, FileOutputStream> fileFosCache = Caffeine.<File, FileOutputStream>newBuilder()
+    // Removed streams are handed over synchronously, so that they can be
+    // closed before any of their files are read.
+    private final Cache<File, FileOutputStream> fileFosCache = Caffeine.newBuilder()
             .maximumSize(1_000)
             .initialCapacity(1_000)
-            .writer(new ClosingCacheWriter(fileFosToClose))
-            .build(key -> new FileOutputStream(key, true));
+            .executor(Runnable::run)
+            .<File, FileOutputStream>removalListener((key, value, cause) -> fileFosToClose.put(key, value))
+            .build();
     private final Cache<IRI, Boolean> iriCache = Caffeine.newBuilder()
             .maximumSize(10_000)
-            .writer(new CacheWriter<IRI, Boolean>() {
-                @Override
-                public void write(IRI key, Boolean value) {
-
-                }
-
-                @Override
-                public void delete(IRI key, Boolean value, RemovalCause cause) {
-
-                }
-            })
             .build();
 
-    public TempIriDictionary(File out, Configuration conf) {
-        super(out, conf);
+    public TempIriDictionary(File out, Hardwood hardwood) {
+        super(out, hardwood);
     }
 
     public void add(IRI subject) throws IOException {
@@ -153,7 +149,7 @@ public class TempIriDictionary extends TempDictionary {
 
         FileOutputStream fos = getFileOutPUtStreamForFile(file);
         String localname = ensureLocalName(subject, namespace);
-        fos.write(StandardCharsets.UTF_8.encode(localname).array());
+        fos.write(localname.getBytes(StandardCharsets.UTF_8));
         fos.write('\n');
         closeEvictedFileOutputStream();
 
@@ -234,7 +230,7 @@ public class TempIriDictionary extends TempDictionary {
                     namespace);
             File tempFile = namespaceTempFile.file;
 
-            final Path iripath = new Path(out.getAbsolutePath(), roNamespace.getId() + "-iris");
+            final File iriFile = new File(out, roNamespace.getId() + "-iris");
             File lengthString = new File(out, roNamespace.getId() + "-prefixed-iris");
 
             File offsetsFile = new File(out, roNamespace.getId() + "-offsets");
@@ -242,10 +238,10 @@ public class TempIriDictionary extends TempDictionary {
             {
                 final List<String> tempNodes = readTempFileIntoMemory(tempFile,
                         data);
-                writeNamespacesToDisk(tempNodes, offsetsFile, lengthString, iripath,
-                        data, conf);
+                writeNamespacesToDisk(tempNodes, offsetsFile, lengthString, iriFile,
+                        data);
             }
-            writeToDisk(data, iriDictionary, offsetsFile, lengthString, roNamespace, iripath);
+            writeToDisk(data, iriDictionary, offsetsFile, lengthString, roNamespace, iriFile);
             removeTempFiles(tempFile);
         }
         return iriDictionary;
@@ -265,19 +261,12 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
-    private void writeToDisk(DataDistribution data, RoIriDictionary iriDictionary, File offsetsFile, File lengthString, RoNamespace roNamespace, final Path iripath) throws IOException {
+    private void writeToDisk(DataDistribution data, RoIriDictionary iriDictionary, File offsetsFile, File lengthString, RoNamespace roNamespace, final File iriFile) throws IOException {
         if (data.allNumericWithPrefix()) {
             
             iriDictionary.addPredixFollowedByBNumberDictionary(offsetsFile, lengthString, roNamespace);
         } else {
-            
-            File iriFile = new File(out.getAbsolutePath(), roNamespace.getId() + "-iris");
-            if (!iriFile.exists()) {
-                iriFile.createNewFile();
-            }
-            
-            Reader irireader = OrcFile.createReader(iripath, OrcFile.readerOptions(conf));
-            iriDictionary.addBasicRoIriNamespaceDictionary(irireader, roNamespace);
+            iriDictionary.addBasicRoIriNamespaceDictionary(ParquetTable.open(hardwood, iriFile), roNamespace);
         }
     }
 
@@ -293,7 +282,7 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
-    private void writeNamespacesToDisk(final List<String> tempNodes, File offsetsFile, File lengthString, Path iriPath, DataDistribution data2, Configuration conf)
+    private void writeNamespacesToDisk(final List<String> tempNodes, File offsetsFile, File lengthString, File iriFile, DataDistribution data2)
             throws IOException, FileNotFoundException {
         if (data2.allNumericWithPrefix()) {
             offsetsFile.createNewFile();
@@ -301,43 +290,24 @@ public class TempIriDictionary extends TempDictionary {
             writeNamespaceWithPrefixedNumbersToDisk(tempNodes, lengthString,
                     offsetsFile, data2);
         } else {
-            writeNamespaceWithLongIdsToDisk(tempNodes, iriPath, conf);
+            writeNamespaceWithLongIdsToDisk(tempNodes, iriFile);
         }
     }
 
-    private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, Path iriPath, Configuration conf)
-            throws IOException, FileNotFoundException {
-        TypeDescription schema = TypeDescription
-                .createStruct()
-                .addField(RoDictionary.ID, TypeDescription.createLong())
-                .addField(RoIriDictionary.IRI_VALUE, TypeDescription.createString());
-        VectorizedRowBatch batch = schema.createRowBatch();
-
-        Iterator<String> iterator = tempNodes.iterator();
-
-        try (Writer writer = OrcFile.createWriter(iriPath,
-                OrcFile.writerOptions(conf)
-                        .bufferSize(500)
-                        .compress(CompressionKind.LZO)
-                        .bloomFilterColumns(RoIriDictionary.IRI_VALUE)
-                        .rowIndexStride(1000)
-                        .setSchema(schema))) {
-            long i = 0;
-            LongColumnVector idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-            BytesColumnVector col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-            while (iterator.hasNext()) {
-                if (batch.size == batch.getMaxSize()) {
-                    writer.addRowBatch(batch);
-                    batch.reset();
-                    idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+    private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, File iriFile)
+            throws IOException {
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(iriFile, SCHEMA)) {
+            for (int start = 0; start < tempNodes.size(); start += BATCH_SIZE) {
+                final int size = Math.min(BATCH_SIZE, tempNodes.size() - start);
+                final long[] ids = new long[size];
+                final byte[][] values = new byte[size][];
+                for (int i = 0; i < size; i++) {
+                    ids[i] = start + i;
+                    values[i] = tempNodes.get(start + i).getBytes(StandardCharsets.UTF_8);
                 }
-
-                idcol.vector[batch.size] = i++;
-                final byte[] bytes = iterator.next().getBytes();
-                col.setVal(batch.size++, bytes);
+                writer.writeBatch(b -> b.longs(RoDictionary.ID, ids)
+                        .bytes(RoIriDictionary.IRI_VALUE, values));
             }
-            writer.addRowBatch(batch);
         }
     }
 

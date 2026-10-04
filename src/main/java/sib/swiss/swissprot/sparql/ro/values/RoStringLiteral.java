@@ -1,6 +1,7 @@
 package sib.swiss.swissprot.sparql.ro.values;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 
@@ -25,6 +26,25 @@ public class RoStringLiteral extends SimpleLiteral implements RoLiteral {
     @Override
     public IRI getDatatype() {
         return dict.dataType(id);
+    }
+
+    @Override
+    public CoreDatatype getCoreDatatype() {
+        return CoreDatatype.from(getDatatype());
+    }
+
+    @Override
+    public String getLabel() {
+        return dict.stringValue(id);
+    }
+
+    /**
+     * As {@link org.eclipse.rdf4j.model.Literal#hashCode()} requires, the
+     * hash of the label.
+     */
+    @Override
+    public int hashCode() {
+        return getLabel().hashCode();
     }
 
     @Override

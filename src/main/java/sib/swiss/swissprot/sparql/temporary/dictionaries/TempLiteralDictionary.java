@@ -1,49 +1,46 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import com.sun.istack.logging.Logger;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.text.Collator;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.CompressionKind;
-import org.apache.orc.OrcFile;
-import org.apache.orc.Reader;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
+import java.util.logging.Logger;
+import java.util.stream.Stream;
 
+import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.DATATYPE_ID;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LABEL;
+import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LANGUAGE;
 
 public class TempLiteralDictionary extends TempDictionary {
+
+    private static final int BATCH_SIZE = 64 * 1024;
 
     private final Map<IRI, FileOutputStream> datatypes = new HashMap<>();
     private final Map<String, FileOutputStream> languages = new HashMap<>();
 
-    public TempLiteralDictionary(File out, Configuration conf) {
-        super(out, conf);
+    public TempLiteralDictionary(File out, Hardwood hardwood) {
+        super(out, hardwood);
     }
 
     public void add(Literal subject) throws IOException {
         final IRI namespace = subject.getDatatype();
-        if (namespace.equals(XMLSchema.BOOLEAN) || namespace.equals(XMLSchema.INT)) {
+        if (namespace.equals(XSD.BOOLEAN) || namespace.equals(XSD.INT)) {
             return;
         }
 
@@ -52,7 +49,7 @@ public class TempLiteralDictionary extends TempDictionary {
             final String language = subject.getLanguage().get();
             FileOutputStream fos = languages.get(language);
             if (fos == null) {
-                fos = new FileOutputStream(new File(out, "lang-" + language));
+                fos = new FileOutputStream(languageFile(language));
                 languages.put(language, fos);
             }
             fos.write(label);
@@ -60,8 +57,7 @@ public class TempLiteralDictionary extends TempDictionary {
         } else {
             FileOutputStream fos = datatypes.get(namespace);
             if (fos == null) {
-                fos = new FileOutputStream(new File(out,
-                        FileNameEncoderFunctions.encodeIRI(namespace)));
+                fos = new FileOutputStream(datatypeFile(namespace));
                 datatypes.put(namespace, fos);
             }
             fos.write(label);
@@ -79,108 +75,107 @@ public class TempLiteralDictionary extends TempDictionary {
         }
     }
 
+    private File languageFile(String language) {
+        return new File(out, "lang-" + language);
+    }
+
+    private File datatypeFile(IRI datatype) {
+        return new File(out, FileNameEncoderFunctions.encodeIRI(datatype));
+    }
+
     public RoLiteralDict load() throws IOException {
-        TypeDescription schema;
-        schema = TypeDescription.createStruct()
-                .addField(RoDictionary.ID, TypeDescription.createLong())
-                .addField(LABEL, TypeDescription.createString())
-                .addField(DATATYPE_ID, TypeDescription.createLong())
-                .addField(RoLiteralDict.LANGUAGE, TypeDescription.createString());
-        VectorizedRowBatch batch = schema.createRowBatch();
-        File file = new File(out.getAbsolutePath(), RoLiteralDict.PATH_NAME);
+        File file = new File(out, RoLiteralDict.PATH_NAME);
         if (file.exists()) {
             file.delete();
         }
-        final Path path = new Path(out.getAbsolutePath(), RoLiteralDict.PATH_NAME);
-        try (Writer writer = OrcFile.createWriter(path,
-                OrcFile.writerOptions(conf)
-                        .setSchema(schema)
-                        .compress(CompressionKind.LZ4))) {
-
-            long index = writeLanguageStrings(batch, writer);
-
-            writeDatatypesStrings(batch, writer, index);
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA)) {
+            LiteralBatch batch = new LiteralBatch(writer);
+            writeLanguageStrings(batch);
+            writeDatatypesStrings(batch);
+            batch.flush();
         }
-        Reader reader = OrcFile.createReader(path, OrcFile.readerOptions(conf));
-        return new RoLiteralDict(reader);
+        return new RoLiteralDict(ParquetTable.open(hardwood, file));
     }
 
-    private long writeLanguageStrings(VectorizedRowBatch batch, final Writer writer) throws IOException {
-        int datatypeCode = RoLiteralDict.datatypeCode(XMLSchema.LANGUAGE);
-        long index = 0;
-        for (String lang : languages.keySet()) {
-            String languageTag = lang.substring(5);
-            try (BufferedReader br = Files.newBufferedReader(new File(out, lang).toPath())) {
-
-                //br returns as stream and convert it into a List
-                Iterator<String> iterator = br.lines()
-                        .sorted(Collator.getInstance(Locale.forLanguageTag(languageTag)))
-                        .distinct()
-                        .iterator();
-                while (iterator.hasNext()) {
-                    LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    BytesColumnVector labelsCol = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-                    LongColumnVector datatypesCol = (LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL];
-                    BytesColumnVector languagesCol = (BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL];
-                    if (batch.size == batch.getMaxSize()) {
-                        datatypesCol.fill(datatypeCode);
-                        writer.addRowBatch(batch);
-                        batch.reset();
-                    }
-                    idCol.vector[batch.size] = index++;
-                    labelsCol.setVal(batch.size, iterator.next().getBytes());
-                   
-                    languagesCol.setVal(batch.size, languageTag.getBytes());
-                    batch.size++;
-                }
-                ((LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL]).fill(datatypeCode);
-                writer.addRowBatch(batch);
-                batch.reset();
-            }
-            if (!new File(out, lang).delete()) {
-                Logger.getLogger(this.getClass()).warning("Can't delete lang temp file " + lang);
-            }
-        }
-        return index;
-    }
-
-    private void writeDatatypesStrings(VectorizedRowBatch batch, Writer writer, long index) throws IOException {
-        for (IRI datatype : datatypes.keySet()) {
-
-            int datatypeCode = RoLiteralDict.datatypeCode(datatype);
-            File tempFile = new File(out, FileNameEncoderFunctions.encodeIRI(datatype));
+    private void writeLanguageStrings(LiteralBatch batch) throws IOException {
+        int datatypeCode = RoLiteralDict.datatypeCode(XSD.LANGUAGE);
+        for (String language : languages.keySet()) {
+            File tempFile = languageFile(language);
             try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
-
-                //br returns as stream and convert it into a List
-                Iterator<String> iterator = br.lines()
-                        .sorted()
-                        .distinct()
-                        .iterator();
-                while (iterator.hasNext()) {
-                    LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    BytesColumnVector labelsCol = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-                    LongColumnVector datatypesCol = (LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL];
-                    BytesColumnVector languagesCol = (BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL];
-                    if (batch.size == batch.getMaxSize()) {
-                        datatypesCol.fill(datatypeCode);
-                        languagesCol.fillWithNulls();
-                        writer.addRowBatch(batch);
-                        batch.reset();
-                    }
-                    idCol.vector[batch.size] = index++;
-                    labelsCol.setVal(batch.size, iterator.next().getBytes());
-                    batch.size++;
-                }
-                ((LongColumnVector) batch.cols[RoLiteralDict.DATATYPE_COL]).fill(datatypeCode);
-                ((BytesColumnVector) batch.cols[RoLiteralDict.LANGUAGE_COL]).fillWithNulls();
-                writer.addRowBatch(batch);
-                batch.reset();
+                Stream<String> labels = br.lines()
+                        .sorted(Collator.getInstance(Locale.forLanguageTag(language)))
+                        .distinct();
+                batch.addAll(labels.iterator(), datatypeCode, language);
             }
-
             if (!tempFile.delete()) {
-                Logger.getLogger(this.getClass()).warning("Can't delete datatype temp file " + datatype);
+                Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete lang temp file " + language);
             }
-           
+        }
+    }
+
+    private void writeDatatypesStrings(LiteralBatch batch) throws IOException {
+        for (IRI datatype : datatypes.keySet()) {
+            int datatypeCode = RoLiteralDict.datatypeCode(datatype);
+            File tempFile = datatypeFile(datatype);
+            try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
+                Stream<String> labels = br.lines()
+                        .sorted()
+                        .distinct();
+                batch.addAll(labels.iterator(), datatypeCode, null);
+            }
+            if (!tempFile.delete()) {
+                Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete datatype temp file " + datatype);
+            }
+        }
+    }
+
+    /**
+     * Collects literal rows, the id of a literal is its row number.
+     */
+    private static final class LiteralBatch {
+
+        private final ParquetTable.Writer writer;
+        private final long[] ids = new long[BATCH_SIZE];
+        private final byte[][] labels = new byte[BATCH_SIZE][];
+        private final long[] datatypeIds = new long[BATCH_SIZE];
+        private final byte[][] languages = new byte[BATCH_SIZE][];
+        private final boolean[] noLanguage = new boolean[BATCH_SIZE];
+        private int size;
+        private long index;
+
+        private LiteralBatch(ParquetTable.Writer writer) {
+            this.writer = writer;
+        }
+
+        private void addAll(Iterator<String> labels, int datatypeCode, String language) throws IOException {
+            final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
+            while (labels.hasNext()) {
+                if (size == BATCH_SIZE) {
+                    flush();
+                }
+                ids[size] = index++;
+                this.labels[size] = stringAsUtf8ByteArray(labels.next());
+                datatypeIds[size] = datatypeCode;
+                languages[size] = languageBytes;
+                noLanguage[size] = language == null;
+                size++;
+            }
+        }
+
+        private void flush() throws IOException {
+            if (size == 0) {
+                return;
+            }
+            final long[] i = Arrays.copyOf(ids, size);
+            final byte[][] l = Arrays.copyOf(labels, size);
+            final long[] d = Arrays.copyOf(datatypeIds, size);
+            final byte[][] lang = Arrays.copyOf(languages, size);
+            final boolean[] nulls = Arrays.copyOf(noLanguage, size);
+            writer.writeBatch(b -> b.longs(RoDictionary.ID, i)
+                    .bytes(LABEL, l)
+                    .longs(DATATYPE_ID, d)
+                    .bytes(LANGUAGE, lang, nulls));
+            size = 0;
         }
     }
 }

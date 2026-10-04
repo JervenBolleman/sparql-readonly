@@ -2,13 +2,9 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.RowReader;
 
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
@@ -21,58 +17,48 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 public class IriIriList extends RoResourceRoValueList<RoIri, RoIri> {
 
-    public IriIriList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
+    public IriIriList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
     }
 
-    public IriIriList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
-    }
-
-    @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new IriIriListIterator(getSchema());
+    public IriIriList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
     }
 
     @Override
-    protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
+    protected RoResourceValueListIterator newIterator(RowReader rows) {
+        return new IriIriListIterator(rows);
     }
 
     @Override
-    protected RoIri getObject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getIriDict());
+    protected RoIri getSubject(RowReader row) {
+        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
     }
 
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    @Override
+    protected RoIri getObject(RowReader row) {
+        return new RoIri(row.getLong(OBJECT), dictionaries.getIriDict());
     }
 
     public static class Builder extends AbstractBuilder<RoIri, RoIri> {
 
         public Builder(File file, RoIri predicate,
-                RoDictionaries dictionaries, Configuration configuration)
+                RoDictionaries dictionaries, Hardwood hardwood)
                 throws IOException {
-            super(file, predicate, dictionaries, configuration, IriIriList::getSchema);
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public IriIriList build() throws IOException {
             save();
-            return new IriIriList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new IriIriList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
         }
 
     }
 
     private class IriIriListIterator extends RoResourceValueListIterator {
 
-        private IriIriListIterator(TypeDescription schema) {
-            super(schema);
+        private IriIriListIterator(RowReader rows) {
+            super(rows);
         }
 
         @Override

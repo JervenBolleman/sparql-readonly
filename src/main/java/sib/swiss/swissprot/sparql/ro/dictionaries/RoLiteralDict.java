@@ -4,19 +4,18 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
-import org.apache.orc.Reader;
-import org.apache.orc.RecordReader;
 
+import dev.hardwood.metadata.LogicalType;
+import dev.hardwood.metadata.PhysicalType;
+import dev.hardwood.metadata.RepetitionType;
+import dev.hardwood.reader.FilterPredicate;
+import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
@@ -27,92 +26,55 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     public static final String DATATYPE_ID = "datatype_id";
     public static final String LANGUAGE = "language";
 
-    private static final IRI[] DATA_TYPES = new IRI[]{XMLSchema.ANYURI,
-        XMLSchema.BASE64BINARY, XMLSchema.BOOLEAN, XMLSchema.BYTE,
-        XMLSchema.DATE, XMLSchema.DATETIME, XMLSchema.DAYTIMEDURATION,
-        XMLSchema.DECIMAL, XMLSchema.DOUBLE, XMLSchema.DURATION,
-        XMLSchema.ENTITIES, XMLSchema.ENTITY, XMLSchema.FLOAT,
-        XMLSchema.GDAY, XMLSchema.GMONTH, XMLSchema.GMONTHDAY,
-        XMLSchema.GYEAR, XMLSchema.GYEARMONTH, XMLSchema.HEXBINARY,
-        XMLSchema.ID, XMLSchema.IDREF, XMLSchema.IDREFS, XMLSchema.INT,
-        XMLSchema.INTEGER, XMLSchema.LANGUAGE, XMLSchema.LONG,
-        XMLSchema.NAME, XMLSchema.NCNAME, XMLSchema.NEGATIVE_INTEGER,
-        XMLSchema.NMTOKEN, XMLSchema.NMTOKENS,
-        XMLSchema.NON_NEGATIVE_INTEGER, XMLSchema.NON_POSITIVE_INTEGER,
-        XMLSchema.NORMALIZEDSTRING, XMLSchema.NOTATION,
-        XMLSchema.POSITIVE_INTEGER, XMLSchema.QNAME, XMLSchema.SHORT,
-        XMLSchema.STRING, XMLSchema.TIME, XMLSchema.TOKEN,
-        XMLSchema.UNSIGNED_BYTE, XMLSchema.UNSIGNED_INT,
-        XMLSchema.UNSIGNED_LONG, XMLSchema.UNSIGNED_SHORT,
-        XMLSchema.YEARMONTHDURATION};
+    private static final IRI[] DATA_TYPES = new IRI[]{XSD.ANYURI,
+        XSD.BASE64BINARY, XSD.BOOLEAN, XSD.BYTE,
+        XSD.DATE, XSD.DATETIME, XSD.DAYTIMEDURATION,
+        XSD.DECIMAL, XSD.DOUBLE, XSD.DURATION,
+        XSD.ENTITIES, XSD.ENTITY, XSD.FLOAT,
+        XSD.GDAY, XSD.GMONTH, XSD.GMONTHDAY,
+        XSD.GYEAR, XSD.GYEARMONTH, XSD.HEXBINARY,
+        XSD.ID, XSD.IDREF, XSD.IDREFS, XSD.INT,
+        XSD.INTEGER, XSD.LANGUAGE, XSD.LONG,
+        XSD.NAME, XSD.NCNAME, XSD.NEGATIVE_INTEGER,
+        XSD.NMTOKEN, XSD.NMTOKENS,
+        XSD.NON_NEGATIVE_INTEGER, XSD.NON_POSITIVE_INTEGER,
+        XSD.NORMALIZEDSTRING, XSD.NOTATION,
+        XSD.POSITIVE_INTEGER, XSD.QNAME, XSD.SHORT,
+        XSD.STRING, XSD.TIME, XSD.TOKEN,
+        XSD.UNSIGNED_BYTE, XSD.UNSIGNED_INT,
+        XSD.UNSIGNED_LONG, XSD.UNSIGNED_SHORT,
+        XSD.YEARMONTHDURATION};
 
-    public static final int DATATYPE_COL = RoDictionary.VALUE_COL + 1;
-    public static final int LANGUAGE_COL = DATATYPE_COL + 1;
+    public static final FileSchema SCHEMA = FileSchema.builder(PATH_NAME)
+            .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
+            .addColumn(LABEL, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
+            .addColumn(DATATYPE_ID, PhysicalType.INT64, RepetitionType.REQUIRED)
+            .addColumn(LANGUAGE, PhysicalType.BYTE_ARRAY, RepetitionType.OPTIONAL, new LogicalType.StringType())
+            .build();
 
-    public RoLiteralDict(Reader reader) {
-        super(reader);
+    public RoLiteralDict(ParquetTable table) {
+        super(table, LABEL);
     }
 
     @Override
     public Optional<RoLiteral> find(Literal value) {
-        try {
-            IRI dt = value.getDatatype();
-            int dtIndex = -1;
-            SearchArgument.Builder builder = SearchArgumentFactory.newBuilder()
-                    .equals(LABEL, PredicateLeaf.Type.STRING, value.stringValue());
-            if (dt != null) {
-                dtIndex = datatypeCode(value.getDatatype());
-                builder = builder.equals(DATATYPE_ID, PredicateLeaf.Type.LONG, (long) dtIndex)
-                        .isNull(LANGUAGE, PredicateLeaf.Type.STRING);
-
-            } else {
-                builder = builder
-                        .equals(LANGUAGE, PredicateLeaf.Type.STRING, value.getLanguage().orElse(""))
-                        .isNull(DATATYPE_ID, PredicateLeaf.Type.LONG);
-            }
-
-            final Reader.Options options = new Reader.Options()
-                    .include(new boolean[]{true, true, true, true, true})
-                    .searchArgument(builder.build(), new String[]{LABEL, DATATYPE_ID, LANGUAGE});
-
-            try (RecordReader rows = reader.rows(options)) {
-                VectorizedRowBatch batch = schema.createRowBatch();
-                boolean nextBatch = rows.nextBatch(batch);
-                while (nextBatch) {
-                    final LongColumnVector id = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    final BytesColumnVector bcv = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-
-                    for (int i = 0; i < batch.size; i++) {
-                        if (dt != null) {
-                            final LongColumnVector dtId = (LongColumnVector) batch.cols[DATATYPE_COL];
-                            if (dtId.vector[i] == dtIndex && new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())) {
-                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
-                            }
-                        } else {
-                            final BytesColumnVector lang = (BytesColumnVector) batch.cols[LANGUAGE_COL];
-                            if (new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())
-                                    && new String(lang.vector[i], lang.start[i], lang.length[i]).equals(value.getLanguage().get())) {
-                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
-                            }
-                        }
-                    }
-                }
-                return Optional.empty();
-            }
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
-            return Optional.empty();
+        final String label = value.stringValue();
+        final Optional<String> language = value.getLanguage();
+        final FilterPredicate filter;
+        if (language.isPresent()) {
+            filter = FilterPredicate.and(FilterPredicate.eq(LABEL, label),
+                    FilterPredicate.eq(LANGUAGE, language.get()));
+        } else {
+            filter = FilterPredicate.and(FilterPredicate.eq(LABEL, label),
+                    FilterPredicate.eq(DATATYPE_ID, (long) datatypeCode(value.getDatatype())),
+                    FilterPredicate.isNull(LANGUAGE));
         }
+        return findId(filter).map(id -> new RoSimpleLiteral(id, this));
     }
 
     public String stringValue(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-            return stringVector.toString(0);
+        try {
+            return readStringAt(id);
         } catch (IOException ex) {
             Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
             return "";
@@ -120,18 +82,15 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public IRI dataType(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            LongColumnVector stringVector = (LongColumnVector) batch.cols[DATATYPE_COL];
-            long did = stringVector.vector[0];
-            return DATA_TYPES[(int) did];
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
+        if (language(id).isPresent()) {
+            return RDF.LANGSTRING;
+        }
+        Optional<Long> datatype = readLongAt(id, DATATYPE_ID);
+        if (datatype.isEmpty()) {
+            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
             return null;
         }
+        return DATA_TYPES[datatype.get().intValue()];
     }
 
     public RoLiteral get(long id) {
@@ -139,25 +98,7 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public Optional<String> language(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            BytesColumnVector bcv = (BytesColumnVector) batch.cols[LANGUAGE_COL];
-            if (bcv.vector[0] == null || bcv.length[0] == 0) {
-                return Optional.empty();
-            }
-            String s = new String(bcv.vector[0], bcv.start[0], bcv.length[0]);
-            if (s.isEmpty()) {
-                return Optional.empty();
-            } else {
-                return Optional.of(s);
-            }
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
-            return Optional.empty();
-        }
+        return readStringAt(id, LANGUAGE).filter(s -> !s.isEmpty());
     }
 
     public static int datatypeCode(IRI datatype) {

@@ -11,9 +11,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.orc.OrcFile;
+import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
 import org.eclipse.rdf4j.repository.sparql.federation.SPARQLServiceResolver;
@@ -46,12 +44,10 @@ public class RoStore extends AbstractSail {
 	private RoIriDictionary iriDict;
 	private RoLiteralDict literalDict;
 	private RoBigIntegerDict integerDict;
-	protected final Configuration conf;
+	protected Hardwood hardwood;
 
 	public RoStore() {
 		this.federatedServiceResolver = new SPARQLServiceResolver();
-		this.conf = new Configuration();
-		this.conf.setAllowNullValueProperties(true);
 	}
 
 	@Override
@@ -66,7 +62,36 @@ public class RoStore extends AbstractSail {
 
 	@Override
 	protected void shutDownInternal() throws SailException {
+		try {
+			closeReaders();
+		} catch (IOException e) {
+			throw new SailException(e);
+		} finally {
+			if (hardwood != null) {
+				hardwood.close();
+				hardwood = null;
+			}
+		}
+	}
 
+	private void closeReaders() throws IOException {
+		for (RoPredicateStore store : stores.values()) {
+			store.close();
+		}
+		stores.clear();
+		closeDictionaries();
+	}
+
+	private void closeDictionaries() throws IOException {
+		if (iriDict != null) {
+			iriDict.close();
+		}
+		if (literalDict != null) {
+			literalDict.close();
+		}
+		if (integerDict != null) {
+			integerDict.close();
+		}
 	}
 
 	@Override
@@ -95,6 +120,7 @@ public class RoStore extends AbstractSail {
 			}
 		}
 		namespaces = new RoNamespaces();
+		hardwood = Hardwood.create();
 		try {
 			reinitIriDictionaries();
 			reinitPredicateStores();
@@ -112,28 +138,16 @@ public class RoStore extends AbstractSail {
 		if (!literalsDir.exists()) {
 			literalsDir.mkdir();
 		}
-		File literalFile = new File(literalsDir, RoLiteralDict.PATH_NAME);
-		if (!literalFile.exists()) {
-			literalFile.createNewFile();
-		}
-		Path literals = new Path(literalsDir.getAbsolutePath(),
-				RoLiteralDict.PATH_NAME);
-		literalDict = new RoLiteralDict(
-				OrcFile.createReader(literals, OrcFile.readerOptions(conf)));
+		literalDict = new RoLiteralDict(ParquetTable.open(hardwood,
+				new File(literalsDir, RoLiteralDict.PATH_NAME)));
 
 		final File integerDir = subDataDirs
 				.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES);
 		if (!integerDir.exists()) {
 			integerDir.mkdir();
 		}
-		File integerFile = new File(integerDir, RoBigIntegerDict.PATH_NAME);
-		if (!integerFile.exists()) {
-			integerFile.createNewFile();
-		}
-		Path integer = new Path(integerDir.getAbsolutePath(),
-				RoBigIntegerDict.PATH_NAME);
-		integerDict = new RoBigIntegerDict(
-				OrcFile.createReader(integer, OrcFile.readerOptions(conf)));
+		integerDict = new RoBigIntegerDict(ParquetTable.open(hardwood,
+				new File(integerDir, RoBigIntegerDict.PATH_NAME)));
 
 		File bnodesDir = subDataDirs.get(RoDirectories.BNODE_DICTIONARIES);
 		if (!bnodesDir.exists()) {
@@ -153,15 +167,20 @@ public class RoStore extends AbstractSail {
 			throws RDFParseException, RDFHandlerException, IOException {
 
 		final TempLiteralDictionary tempLitalDictionary = new TempLiteralDictionary(
-				subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), conf);
+				subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), hardwood);
 		final TempIriDictionary tempIriDictionary = new TempIriDictionary(
-				subDataDirs.get(RoDirectories.IRI_DICTIONARIES), conf);
+				subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood);
 		final TempIntegerDictionary tempIntegerDictionary = new TempIntegerDictionary(
 				subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES),
-				conf);
+				hardwood);
 		parseFilesForTempDictionaries(tempLitalDictionary, tempIriDictionary,
 				tempIntegerDictionary, files);
+		// flushes what was collected to the temp files read by load()
+		tempLitalDictionary.close();
+		tempIriDictionary.close();
+		tempIntegerDictionary.close();
 
+		closeDictionaries();
 		iriDict = tempIriDictionary.load();
 		literalDict = tempLitalDictionary.load();
 		integerDict = tempIntegerDictionary.load();
@@ -221,29 +240,38 @@ public class RoStore extends AbstractSail {
 
 	private void reinitPredicateStores()
 			throws FileNotFoundException, IOException {
+		for (RoPredicateStore store : stores.values()) {
+			store.close();
+		}
 		stores.clear();
 		RoDictionaries dictionaries = new RoDictionaries(iriDict, literalDict,
 				integerDict);
 		for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
 				.listFiles()) {
 			final RoPredicateStore roPredicateStore = new RoPredicateStore(
-					predicateDir, dictionaries, conf);
+					predicateDir, dictionaries, hardwood);
 			RoIri predicate = roPredicateStore.getPredicate();
 			stores.put(predicate, roPredicateStore);
 		}
 	}
 
-	public RoPredicateStore getPredicateStore(IRI predicate)
-			throws FileNotFoundException, IOException {
-		RoPredicateStore store = stores.get(predicate);
-		if (store == null) {
-			store = new RoPredicateStore(RoPredicateStore.initDirectory(
-					subDataDirs.get(RoDirectories.PREDICATE_LISTS), predicate),
-					new RoDictionaries(iriDict, literalDict, integerDict),
-					conf);
-			stores.put(predicate, store);
+	/**
+	 * @return the store for this predicate or null if there are no triples
+	 * with it.
+	 */
+	public RoPredicateStore getPredicateStore(IRI predicate) {
+		if (predicate instanceof RoIri) {
+			return stores.get(predicate);
 		}
-		return store;
+		// The stores are keyed on RoIri, whose hashCode is not that of other
+		// IRI implementations.
+		return iriDict.find(predicate).map(stores::get).orElse(null);
+	}
+
+	@Override
+	protected void connectionClosed(SailConnection connection) {
+		// widened to the package for RoConnection
+		super.connectionClosed(connection);
 	}
 
 	public void addPredicateStore(RoPredicateStore build) {

@@ -2,15 +2,10 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.RowReader;
 
-import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
@@ -21,59 +16,49 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntegerLiteral> {
 
-    public IriIntegerLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration)
+    public IriIntegerLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood)
             throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
     }
 
-    public IriIntegerLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
-    }
-
-    @Override
-    protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
+    public IriIntegerLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
     }
 
     @Override
-    protected RoIntegerLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoIntegerLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index]);
-    }
-
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    protected RoIri getSubject(RowReader row) {
+        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new IriIntegerListIterator(getSchema());
+    protected RoIntegerLiteral getObject(RowReader row) {
+        return new RoIntegerLiteral(row.getLong(OBJECT));
+    }
+
+    @Override
+    protected RoResourceValueListIterator newIterator(RowReader rows) {
+        return new IriIntegerListIterator(rows);
     }
 
     public static class Builder extends AbstractBuilder<RoIri, RoIntegerLiteral> {
 
         public Builder(File file, RoIri predicate,
-                RoDictionaries dictionaries, Configuration configuration)
+                RoDictionaries dictionaries, Hardwood hardwood)
                 throws IOException {
-            super(file, predicate, dictionaries, configuration, IriIntegerLiteralList::getSchema);
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public IriIntegerLiteralList build() throws IOException {
             save();
-            return new IriIntegerLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new IriIntegerLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
         }
 
     }
 
     private class IriIntegerListIterator extends RoResourceValueListIterator {
 
-        private IriIntegerListIterator(TypeDescription schema) {
-            super(schema);
+        private IriIntegerListIterator(RowReader rows) {
+            super(rows);
         }
     }
 }

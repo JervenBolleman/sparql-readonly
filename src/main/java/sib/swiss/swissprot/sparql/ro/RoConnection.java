@@ -1,11 +1,9 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.util.Iterator;
-
-import org.eclipse.rdf4j.IsolationLevel;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteratorIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
+import org.eclipse.rdf4j.common.transaction.IsolationLevel;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Namespace;
 import org.eclipse.rdf4j.model.Resource;
@@ -15,19 +13,9 @@ import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.BindingAssigner;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.CompareOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.ConjunctiveConstraintSplitter;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.ConstantOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.DisjunctiveConstraintOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.FilterOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.IterativeEvaluationOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.OrderLimitOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryModelNormalizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.SameTermFilterOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
-import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.DefaultEvaluationStrategy;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.EvaluationStatistics;
+import org.eclipse.rdf4j.query.algebra.evaluation.optimizer.StandardQueryOptimizerPipeline;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.UnknownSailTransactionStateException;
@@ -37,6 +25,7 @@ public class RoConnection implements SailConnection {
 
 	private final RoStore store;
 	private final RoTripleSource tripleSource;
+	private volatile boolean open = true;
 
 	public RoConnection(RoStore store) {
 		super();
@@ -46,90 +35,46 @@ public class RoConnection implements SailConnection {
 
 	@Override
 	public boolean isOpen() throws SailException {
-		return true;
+		return open;
 	}
 
 	@Override
 	public void close() throws SailException {
-
+		if (open) {
+			open = false;
+			store.connectionClosed(this);
+		}
 	}
 
 	@Override
-	public CloseableIteration<? extends BindingSet, QueryEvaluationException> evaluate(
+	public CloseableIteration<? extends BindingSet> evaluate(
 			TupleExpr tupleExpr, Dataset dataset, BindingSet bindings,
 			boolean includeInferred) throws SailException {
 		try {
-
-			EvaluationStrategy strategy = new StrictEvaluationStrategy(
-					tripleSource, store.getFederatedServiceResolver());
-			tupleExpr = tupleExpr.clone();
-			new BindingAssigner().optimize(tupleExpr, dataset, bindings);
-			new ConstantOptimizer(strategy).optimize(tupleExpr, dataset,
-					bindings);
-			new CompareOptimizer().optimize(tupleExpr, dataset, bindings);
-			new ConjunctiveConstraintSplitter().optimize(tupleExpr, dataset,
-					bindings);
-			new DisjunctiveConstraintOptimizer().optimize(tupleExpr, dataset,
-					bindings);
-			new SameTermFilterOptimizer().optimize(tupleExpr, dataset,
-					bindings);
-			new QueryModelNormalizer().optimize(tupleExpr, dataset, bindings);
-
-			new IterativeEvaluationOptimizer().optimize(tupleExpr, dataset,
-					bindings);
-			new FilterOptimizer().optimize(tupleExpr, dataset, bindings);
-			new OrderLimitOptimizer().optimize(tupleExpr, dataset, bindings);
-
-			return strategy.evaluate(tupleExpr, EmptyBindingSet.getInstance());
+			EvaluationStatistics statistics = new EvaluationStatistics();
+			DefaultEvaluationStrategy strategy = new DefaultEvaluationStrategy(
+					tripleSource, dataset, store.getFederatedServiceResolver());
+			strategy.setOptimizerPipeline(new StandardQueryOptimizerPipeline(
+					strategy, tripleSource, statistics));
+			TupleExpr optimized = strategy.optimize(tupleExpr.clone(),
+					statistics, bindings);
+			return strategy.precompile(optimized).evaluate(bindings);
 		} catch (QueryEvaluationException e) {
 			throw new SailException(e);
 		}
 	}
 
 	@Override
-	public CloseableIteration<? extends Resource, SailException> getContextIDs()
+	public CloseableIteration<? extends Resource> getContextIDs()
 			throws SailException {
 		return new EmptyIteration<>();
 	}
 
 	@Override
-	public CloseableIteration<? extends Statement, SailException> getStatements(
+	public CloseableIteration<? extends Statement> getStatements(
 			Resource subj, IRI pred, Value obj, boolean includeInferred,
 			Resource... contexts) throws SailException {
-
-		final RoFilteredTripleIterator fti = new RoFilteredTripleIterator(store,
-				subj, pred, obj, contexts);
-		return new CloseableIteratorIteration<Statement, SailException>() {
-
-			@Override
-			public boolean hasNext() throws SailException {
-				try {
-					return fti.hasNext();
-				} catch (QueryEvaluationException e) {
-					throw new SailException(e);
-				}
-			}
-
-			@Override
-			public Statement next() throws SailException {
-				try {
-					return fti.next();
-				} catch (QueryEvaluationException e) {
-					throw new SailException(e);
-				}
-			}
-
-			@Override
-			protected void handleClose() throws SailException {
-				try {
-					fti.close();
-				} catch (QueryEvaluationException e) {
-					throw new SailException(e);
-				}
-				super.handleClose();
-			}
-		};
-
+		return new RoFilteredTripleIterator(store, subj, pred, obj, contexts);
 	}
 
 	@Override
@@ -182,25 +127,9 @@ public class RoConnection implements SailConnection {
 	}
 
 	@Override
-	public CloseableIteration<? extends Namespace, SailException> getNamespaces()
+	public CloseableIteration<? extends Namespace> getNamespaces()
 			throws SailException {
-
-		return new CloseableIteratorIteration<Namespace, SailException>() {
-			private Iterator<RoNamespace> namespaces = store.getNamespaces()
-					.iterator();
-
-			@Override
-			public boolean hasNext() throws SailException {
-				return namespaces.hasNext();
-			}
-
-			@Override
-			public RoNamespace next() throws SailException {
-				return namespaces.next();
-			};
-		}
-
-		;
+		return new CloseableIteratorIteration<>(store.getNamespaces().iterator());
 	}
 
 	@Override
@@ -290,12 +219,6 @@ public class RoConnection implements SailConnection {
 	public boolean hasStatement(Resource subj, IRI pred, Value obj,
 			boolean includeInferred, Resource... contexts)
 			throws SailException {
-
-		return false;
-	}
-
-	@Override
-	public boolean pendingRemovals() {
 
 		return false;
 	}

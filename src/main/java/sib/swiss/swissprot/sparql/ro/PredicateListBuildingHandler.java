@@ -14,7 +14,7 @@ import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
-import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 import org.eclipse.rdf4j.rio.RDFHandler;
 import org.eclipse.rdf4j.rio.RDFHandlerException;
 
@@ -117,7 +117,7 @@ public class PredicateListBuildingHandler implements RDFHandler {
 					builder = new RoPredicateStore.Builder(
 							RoPredicateStore.initDirectory(predicateListsDir,
 									predicate),
-							predicate, dictionaries, roStore.conf);
+							predicate, dictionaries, roStore.hardwood);
 					builders.put(predicate, builder);
 				}
 			}
@@ -150,11 +150,11 @@ public class PredicateListBuildingHandler implements RDFHandler {
 			final Literal literal = (Literal) subject;
 			if (subject instanceof IntegerLiteral) {
 				return dictionaries.getIntDict().find((IntegerLiteral) subject);
-			} else if (XMLSchema.INTEGER.equals(literal.getDatatype())) {
+			} else if (XSD.INTEGER.equals(literal.getDatatype())) {
 				return dictionaries.getIntDict().find(literal.integerValue());
-			} else if (XMLSchema.INT.equals(literal.getDatatype())) {
+			} else if (XSD.INT.equals(literal.getDatatype())) {
 				return Optional.of(new RoIntegerLiteral(literal.intValue()));
-			} else if (XMLSchema.BOOLEAN.equals(literal.getDatatype())) {
+			} else if (XSD.BOOLEAN.equals(literal.getDatatype())) {
 				return Optional
 						.of(new RoBooleanLiteral(literal.booleanValue()));
 			} else {

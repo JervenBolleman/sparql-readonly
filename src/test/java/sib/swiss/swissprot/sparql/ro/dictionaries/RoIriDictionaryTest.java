@@ -7,7 +7,7 @@ package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
 import java.util.Optional;
-import org.apache.hadoop.conf.Configuration;
+import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
@@ -29,13 +29,14 @@ public class RoIriDictionaryTest {
 
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
+    private final Hardwood hardwood = Hardwood.create();
 
     @Test
     public void testBasic() throws IOException {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), new Configuration());
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
         temp.add(RDF.TYPE);
         temp.add(RDF.VALUE);
         temp.add(RDF.ALT);
@@ -53,6 +54,7 @@ public class RoIriDictionaryTest {
 
     @After
     public void after() throws Exception {
+        hardwood.close();
         folder.delete();
     }
 
@@ -61,7 +63,7 @@ public class RoIriDictionaryTest {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), new Configuration());
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
         for (int i = 0; i < 10_000; i++) {
             temp.add(SimpleValueFactory.getInstance().createIRI(RDF.NAMESPACE, i + "aaaa"));
         }
@@ -81,7 +83,7 @@ public class RoIriDictionaryTest {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), new Configuration());
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
         for (int j = 0; j < 4_000; j++) {
             for (int i = 0; i < 50; i++) {
                 temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/" + j + '/', i + "aaaa"));

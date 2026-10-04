@@ -10,25 +10,16 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.common.type.HiveDecimal;
-import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
-import org.apache.orc.CompressionKind;
-import org.apache.orc.OrcFile;
-import org.apache.orc.Reader;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
+import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 
@@ -36,20 +27,22 @@ public class TempIntegerDictionary extends TempDictionary {
 
 	private final Set<BigInteger> set = new HashSet<>();
 
-	public TempIntegerDictionary(File out, Configuration conf) {
-		super(out, conf);
+	public TempIntegerDictionary(File out, Hardwood hardwood) {
+		super(out, hardwood);
 	}
 
 	public void add(IntegerLiteral subject) throws IOException {
+		add(subject.integerValue());
+	}
+
+	public void add(BigInteger value) throws IOException {
 		try {
-			if ((SECOND_BYTE_TRUE & subject.integerValue()
-					.longValueExact()) == SECOND_BYTE_TRUE) {
-				set.add(subject.integerValue());
+			if ((SECOND_BYTE_TRUE & value.longValueExact()) == SECOND_BYTE_TRUE) {
+				set.add(value);
 			}
 		} catch (ArithmeticException e) {
-			set.add(subject.integerValue());
+			set.add(value);
 		}
-
 	}
 
 	@Override
@@ -64,52 +57,39 @@ public class TempIntegerDictionary extends TempDictionary {
 	}
 
 	public RoBigIntegerDict load() throws IOException {
-		TypeDescription schema;
-		schema = TypeDescription.createStruct()
-				.addField(RoDictionary.ID, TypeDescription.createLong())
-				.addField(INT_LONG_VALUE, TypeDescription.createDecimal());
-		VectorizedRowBatch batch = schema.createRowBatch();
-		File file = new File(out.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
+		File file = new File(out, RoBigIntegerDict.PATH_NAME);
 		if (file.exists()) {
 			file.delete();
 		}
-		final Path path = new Path(out.getAbsolutePath(),
-				RoBigIntegerDict.PATH_NAME);
-		try (Writer writer = OrcFile.createWriter(path,
-				OrcFile.writerOptions(conf).setSchema(schema)
-						.compress(CompressionKind.LZ4))) {
-
-			File f = new File(out, "temp");
-			if (f.exists()) {
-				writeIntegersToRowVectors(f, batch, writer);
+		File f = new File(out, "temp");
+		if (f.exists()) {
+			try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoBigIntegerDict.SCHEMA)) {
+				writeIntegers(f, writer);
+			} catch (ClassNotFoundException ex) {
+				Logger.getLogger(TempIntegerDictionary.class.getName())
+						.log(Level.SEVERE, null, ex);
 			}
-		} catch (ClassNotFoundException ex) {
-			Logger.getLogger(TempIntegerDictionary.class.getName())
-					.log(Level.SEVERE, null, ex);
 		}
-
-		Reader reader = OrcFile.createReader(path, OrcFile.readerOptions(conf));
-		return new RoBigIntegerDict(reader);
+		return new RoBigIntegerDict(ParquetTable.open(hardwood, file));
 	}
 
-	private void writeIntegersToRowVectors(File f, VectorizedRowBatch batch,
-			final Writer writer) throws ClassNotFoundException, IOException {
+	private void writeIntegers(File f, ParquetTable.Writer writer)
+			throws ClassNotFoundException, IOException {
 		try (ObjectInputStream in = new ObjectInputStream(
 				new FileInputStream(f))) {
 			int size = in.readInt();
-			for (int i = 0; i < size; i++) {
-				LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-				DecimalColumnVector datatypesCol = (DecimalColumnVector) batch.cols[RoDictionary.VALUE_COL];
-
-				if (batch.size == batch.getMaxSize()) {
-					writer.addRowBatch(batch);
-					batch.reset();
-				}
-				BigInteger read = (BigInteger) in.readObject();
-				idCol.vector[batch.size] = i;
-				datatypesCol.vector[batch.size++] = new HiveDecimalWritable(
-						HiveDecimal.create(read));
+			if (size == 0) {
+				return;
 			}
+			long[] ids = new long[size];
+			byte[][] values = new byte[size][];
+			for (int i = 0; i < size; i++) {
+				BigInteger read = (BigInteger) in.readObject();
+				ids[i] = i;
+				values[i] = read.toString().getBytes(StandardCharsets.US_ASCII);
+			}
+			writer.writeBatch(b -> b.longs(RoDictionary.ID, ids)
+					.bytes(INT_LONG_VALUE, values));
 		}
 	}
 }

@@ -17,7 +17,6 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
-import org.eclipse.rdf4j.sail.SailException;
 import org.junit.After;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -88,7 +87,7 @@ public class RoStoreTest {
         store.load(file);
         assertNotNull(store);
 
-        CloseableIteration<? extends Statement, SailException> statements = store.getConnection().getStatements(null, PREDICATE, null, true);
+        CloseableIteration<? extends Statement> statements = store.getConnection().getStatements(null, PREDICATE, null, true);
         assertEquals(5, store.getConnection().size());
         assertTrue(statements.hasNext());
         Statement next = statements.next();
@@ -131,12 +130,128 @@ public class RoStoreTest {
     }
 
     @Test
+    public void languageLiteralLoad() throws IOException {
+        final Literal french = VF.createLiteral("bonjour", "fr");
+        File file = folder.newFile("lang.ttl");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
+            writer.startRDF();
+            writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, french));
+            writer.endRDF();
+        }
+
+        RoStoreFactory fact = new RoStoreFactory();
+        final RoConfig config = fact.getConfig();
+        config.setFile(dir.toString());
+        RoStore store = fact.getSail(config);
+        store.init();
+        try {
+            store.load(file);
+            try (var connection = store.getConnection();
+                    CloseableIteration<? extends Statement> statements = connection
+                            .getStatements(null, PREDICATE, null, true)) {
+                java.util.Set<Value> objects = new java.util.HashSet<>();
+                statements.forEachRemaining(st -> objects.add(st.getObject()));
+                assertEquals(1, objects.size());
+                assertTrue(objects.stream().anyMatch(french::equals));
+            }
+        } finally {
+            store.shutDown();
+        }
+    }
+
+    @Test
+    public void integerLoad() throws IOException {
+        final java.util.List<Literal> integers = java.util.List.of(
+                VF.createLiteral(java.math.BigInteger.valueOf(42)),
+                VF.createLiteral(java.math.BigInteger.valueOf(-5)),
+                VF.createLiteral(new java.math.BigInteger("99999999999999999999999")));
+        final org.eclipse.rdf4j.model.BNode bnode = VF.createBNode();
+        File file = folder.newFile("integers.ttl");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
+            writer.startRDF();
+            for (Literal integer : integers) {
+                writer.handleStatement(VF.createStatement(SUBJECT, PREDICATE, integer));
+                writer.handleStatement(VF.createStatement(bnode, PREDICATE, integer));
+            }
+            writer.endRDF();
+        }
+
+        RoStoreFactory fact = new RoStoreFactory();
+        final RoConfig config = fact.getConfig();
+        config.setFile(dir.toString());
+        RoStore store = fact.getSail(config);
+        store.init();
+        try {
+            store.load(file);
+            try (var connection = store.getConnection();
+                    CloseableIteration<? extends Statement> statements = connection
+                            .getStatements(null, PREDICATE, null, true)) {
+                java.util.List<Statement> all = new java.util.ArrayList<>();
+                statements.forEachRemaining(all::add);
+                assertEquals(6, all.size());
+                for (Literal integer : integers) {
+                    assertEquals(integer.toString(), 2,
+                            all.stream().filter(st -> integer.equals(st.getObject())).count());
+                    assertTrue(all.stream().anyMatch(st -> st.getObject().equals(integer)));
+                }
+            }
+        } finally {
+            store.shutDown();
+        }
+    }
+
+    @Test
+    public void bnodeLiteralLoad() throws IOException {
+        final java.util.List<Literal> literals = java.util.List.of(
+                VF.createLiteral("hello"),
+                VF.createLiteral("bonjour", "fr"),
+                VF.createLiteral(true),
+                VF.createLiteral(7),
+                // the label Turtle writes for 1.5d
+                VF.createLiteral("1.5E0", org.eclipse.rdf4j.model.vocabulary.XSD.DOUBLE));
+        final org.eclipse.rdf4j.model.BNode bnode = VF.createBNode();
+        File file = folder.newFile("bnodes.ttl");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
+            writer.startRDF();
+            for (Literal literal : literals) {
+                writer.handleStatement(VF.createStatement(bnode, PREDICATE, literal));
+            }
+            writer.endRDF();
+        }
+
+        RoStoreFactory fact = new RoStoreFactory();
+        final RoConfig config = fact.getConfig();
+        config.setFile(dir.toString());
+        RoStore store = fact.getSail(config);
+        store.init();
+        try {
+            store.load(file);
+            try (var connection = store.getConnection();
+                    CloseableIteration<? extends Statement> statements = connection
+                            .getStatements(null, PREDICATE, null, true)) {
+                java.util.List<Statement> all = new java.util.ArrayList<>();
+                statements.forEachRemaining(all::add);
+                assertEquals(literals.size(), all.size());
+                for (Literal literal : literals) {
+                    assertTrue(literal + " not in " + all.stream().map(st -> st.getObject().toString()).toList(),
+                            all.stream().anyMatch(st -> literal.equals(st.getObject())));
+                }
+            }
+        } finally {
+            store.shutDown();
+        }
+    }
+
+    @Test
     public void taxonomyTripleLoad() throws IOException {
         RoStoreFactory fact = new RoStoreFactory();
         final RoConfig config = fact.getConfig();
         config.setFile(dir.toString());
         RoStore store = fact.getSail(config);
-        store.initialize();
+        store.init();
         store.load(new File("test_data", "taxonomy.rdf"), new File("test_data", "taxonomy-hierarchy.rdf"));
         assertEquals(40_000_000, store.getConnection().size());
     }

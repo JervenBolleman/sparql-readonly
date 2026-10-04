@@ -13,7 +13,7 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import org.apache.hadoop.conf.Configuration;
+import dev.hardwood.Hardwood;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
@@ -33,6 +33,7 @@ public class RoIriPrefixFollowedByNumberTest {
     private static final String PREFIX = "GO_";
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
+    private final Hardwood hardwood = Hardwood.create();
 
     @Test
     public void directlyBuild() throws IOException {
@@ -80,6 +81,7 @@ public class RoIriPrefixFollowedByNumberTest {
 
     @After
     public void after() throws Exception {
+        hardwood.close();
         folder.delete();
     }
 
@@ -87,7 +89,7 @@ public class RoIriPrefixFollowedByNumberTest {
     public void buildViaTempDir() throws IOException {
 
         File temp = folder.newFolder("tempiridictionary");
-        TempIriDictionary tempIriDictionary = new TempIriDictionary(temp, new Configuration());
+        TempIriDictionary tempIriDictionary = new TempIriDictionary(temp, hardwood);
 
         IRI sTen = SimpleValueFactory.getInstance().createIRI(NAMESPACE,
                 PREFIX + "00010");

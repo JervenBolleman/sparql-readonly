@@ -4,6 +4,7 @@ import java.io.IOException;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
@@ -89,8 +90,10 @@ public class DictionaryBuildingHandler implements RDFHandler {
     }
 
     void addLiteral(Literal object) throws IOException {
-        if (object instanceof IntegerLiteral) {
-            integerDictionary.add((IntegerLiteral) object);
+        // Same test as PredicateListBuildingHandler uses to find them
+        if (object instanceof IntegerLiteral
+                || XSD.INTEGER.equals(object.getDatatype())) {
+            integerDictionary.add(object.integerValue());
         } else {
             literals.add(object);
         }

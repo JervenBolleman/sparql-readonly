@@ -23,9 +23,4 @@ public class RoBigIntegerLiteral extends IntegerLiteral implements RoLiteral {
     public long getLongId() {
         return id;
     }
-
-    @Override
-    public int hashCode() {
-        return toString().hashCode();
-    }
 }

@@ -2,21 +2,12 @@ package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
 import java.util.Optional;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
-import org.apache.orc.Reader;
-import org.apache.orc.RecordReader;
-import org.apache.orc.StringColumnStatistics;
+import dev.hardwood.reader.FilterPredicate;
 import org.eclipse.rdf4j.model.IRI;
 
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -25,14 +16,13 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 		implements RoIriNamespaceDictionary {
 
 	private static final int BITS_IN_A_LONG = Long.BYTES * 8;
-	public static final String LOCAL_NAME_COLUMN = "local_name_value";
 
 	private final RoNamespace roNamespace;
 	private final RoIriDictionary roIriDictionary;
 
-	public BasicRoIriNamespaceDictionary(Reader reader, RoNamespace roNamespace,
+	public BasicRoIriNamespaceDictionary(ParquetTable table, RoNamespace roNamespace,
 			RoIriDictionary roIriDictionary) {
-		super(reader);
+		super(table, RoIriDictionary.IRI_VALUE);
 		this.roNamespace = roNamespace;
 		this.roIriDictionary = roIriDictionary;
 	}
@@ -68,60 +58,8 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 			localName = iri.getNamespace().substring(namespace.length());
 		}
 		if (namespace.equals(roNamespace.getName())) {
-			try {
-				// There is a column of colunms statistics
-				StringColumnStatistics statistics = (StringColumnStatistics) reader
-						.getStatistics()[RoDictionary.VALUE_COL + 1];
-				String searchLocal = iri.getLocalName();
-				if (statistics.getMinimum().compareTo(searchLocal) > 0
-						&& (statistics.getMaximum()
-								.compareTo(searchLocal) < 0)) {
-					return Optional.empty();
-				}
-				Reader.Options options = new Reader.Options();
-
-				SearchArgument equals = SearchArgumentFactory.newBuilder()
-						.equals(LOCAL_NAME_COLUMN, PredicateLeaf.Type.STRING,
-								localName)
-						.build();
-				options = options
-						.searchArgument(equals,
-								new String[] { null, LOCAL_NAME_COLUMN,
-										RoDictionary.ID })
-						.include(new boolean[] { true, true, true });
-				return searchInRows(options, localName);
-
-			} catch (IOException ex) {
-				Logger.getLogger(BasicRoIriNamespaceDictionary.class.getName())
-						.log(Level.SEVERE, null, ex);
-			}
-		}
-		return Optional.empty();
-	}
-
-	private Optional<RoIri> searchInRows(final Reader.Options options,
-			String localName) throws IOException {
-		try (RecordReader rows = reader.rows(options)) {
-			VectorizedRowBatch batch = schema.createRowBatch();
-
-			boolean nextBatch = rows.nextBatch(batch);
-			while (nextBatch) {
-
-				final LongColumnVector name = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-				final BytesColumnVector bcv = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-
-				for (int i = 0; i < batch.size; i++) {
-					String local = new String(bcv.vector[i], bcv.start[i],
-							bcv.length[i]);
-					if (local.equals(localName)) {
-						long id = name.vector[i];
-						final RoIri roIri = new RoIri(nameSpacedId(id),
-								roIriDictionary);
-						return Optional.of(roIri);
-					}
-				}
-				nextBatch = rows.nextBatch(batch);
-			}
+			return findId(FilterPredicate.eq(RoIriDictionary.IRI_VALUE, localName))
+					.map(id -> new RoIri(nameSpacedId(id), roIriDictionary));
 		}
 		return Optional.empty();
 	}

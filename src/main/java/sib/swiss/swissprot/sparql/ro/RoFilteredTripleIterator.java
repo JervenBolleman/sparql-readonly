@@ -1,6 +1,5 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Objects;
@@ -16,7 +15,7 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 
 public class RoFilteredTripleIterator implements
-        CloseableIteration<Statement, QueryEvaluationException> {
+        CloseableIteration<Statement> {
 
     final Iterator<Statement> predicateStores;
 
@@ -24,11 +23,8 @@ public class RoFilteredTripleIterator implements
             Value obj, Resource[] contexts) {
         Stream<Statement> stream;
         if (pred != null) {
-            try {
-                stream = store.getPredicateStore(pred).stream();
-            } catch (IOException e) {
-                throw new QueryEvaluationException(e);
-            }
+            RoPredicateStore predicateStore = store.getPredicateStore(pred);
+            stream = predicateStore == null ? Stream.empty() : predicateStore.stream();
         } else if (contexts == null || contexts.length == 0) {
             stream = store.getPredicateStores()
                     .values()
@@ -62,23 +58,23 @@ public class RoFilteredTripleIterator implements
     }
 
     @Override
-    public boolean hasNext() throws QueryEvaluationException {
+    public boolean hasNext() {
         return predicateStores.hasNext();
     }
 
     @Override
-    public Statement next() throws QueryEvaluationException {
+    public Statement next() {
         return predicateStores.next();
     }
 
     @Override
-    public void remove() throws QueryEvaluationException {
+    public void remove() {
         throw new QueryEvaluationException("RO does not support removal");
 
     }
 
     @Override
-    public void close() throws QueryEvaluationException {
+    public void close() {
 
     }
 }

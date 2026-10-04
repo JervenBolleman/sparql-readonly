@@ -7,6 +7,7 @@ import java.util.Optional;
 import javax.xml.datatype.XMLGregorianCalendar;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.datatypes.XMLDatatypeUtil;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
@@ -23,6 +24,15 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
     public RoSimpleLiteral(long id, RoLiteralDict roLiteralDict) {
         this.id = id;
         this.dict = roLiteralDict;
+    }
+
+    /**
+     * As {@link org.eclipse.rdf4j.model.Literal#hashCode()} requires, the
+     * hash of the label.
+     */
+    @Override
+    public int hashCode() {
+        return getLabel().hashCode();
     }
 
     @Override
@@ -55,7 +65,7 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
 
         if (Literals.isLanguageLiteral(this)) {
             sb.append('@');
-            sb.append(getLanguage());
+            sb.append(getLanguage().get());
         } else {
             sb.append("^^<");
             sb.append(getDatatype().toString());
@@ -74,6 +84,11 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
     @Override
     public IRI getDatatype() {
         return dict.dataType(id);
+    }
+
+    @Override
+    public CoreDatatype getCoreDatatype() {
+        return CoreDatatype.from(getDatatype());
     }
 
     @Override

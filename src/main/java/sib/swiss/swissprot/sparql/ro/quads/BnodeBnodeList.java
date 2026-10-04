@@ -2,15 +2,10 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.RowReader;
 
-import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 
@@ -19,59 +14,50 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class BnodeBnodeList extends RoResourceRoValueList<RoBnode, RoBnode> {
 
-    public BnodeBnodeList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
+    public BnodeBnodeList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
     }
 
     public BnodeBnodeList(File file, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
             Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
-            RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bNodeGraphsMap, dictionaries, configuration);
+            RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        super(file, predicate, iriGraphsMap, bNodeGraphsMap, dictionaries, hardwood);
     }
 
     @Override
-    protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
+    protected RoBnode getSubject(RowReader row) {
+        return new RoBnode(row.getLong(SUBJECT));
     }
 
     @Override
-    protected RoBnode getObject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index]);
-    }
-
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    protected RoBnode getObject(RowReader row) {
+        return new RoBnode(row.getLong(OBJECT));
     }
 
     public static class Builder extends AbstractBuilder<RoBnode, RoBnode> {
 
-        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-            super(file, predicate, dictionaries, configuration, BnodeBnodeList::getSchema);
+        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public BnodeBnodeList build() throws IOException {
             save();
-            return new BnodeBnodeList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new BnodeBnodeList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
         }
     }
 
     private class BnodeBnodeListIterator extends RoResourceValueListIterator {
 
-        private BnodeBnodeListIterator(TypeDescription schema) {
-            super(schema);
+        private BnodeBnodeListIterator(RowReader rows) {
+            super(rows);
         }
 
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0)
-            Collections.emptyIterator();
-        return new BnodeBnodeListIterator(getSchema());
+    protected RoResourceValueListIterator newIterator(RowReader rows) {
+        return new BnodeBnodeListIterator(rows);
     }
 
 }

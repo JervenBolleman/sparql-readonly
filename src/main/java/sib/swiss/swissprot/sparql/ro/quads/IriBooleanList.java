@@ -4,14 +4,9 @@ import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLon
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
-import org.eclipse.rdf4j.model.Statement;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.RowReader;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
@@ -25,59 +20,49 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLiteral> {
 
-    public IriBooleanList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+    public IriBooleanList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
     }
 
-    public IriBooleanList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
-    }
-
-    @Override
-    protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
+    public IriBooleanList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
     }
 
     @Override
-    protected RoBooleanLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoBooleanLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index] == 1L);
-    }
-
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    protected RoIri getSubject(RowReader row) {
+        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new IriBooleanListIterator(getSchema());
+    protected RoBooleanLiteral getObject(RowReader row) {
+        return new RoBooleanLiteral(row.getLong(OBJECT) == 1L);
+    }
+
+    @Override
+    protected RoResourceValueListIterator newIterator(RowReader rows) {
+        return new IriBooleanListIterator(rows);
     }
 
     public static class Builder extends AbstractBuilder<RoIri, RoBooleanLiteral> {
 
         public Builder(File file, RoIri predicate,
-                RoDictionaries dictionaries, Configuration configuration)
+                RoDictionaries dictionaries, Hardwood hardwood)
                 throws IOException {
-            super(file, predicate, dictionaries, configuration, IriBooleanList::getSchema);
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public IriBooleanList build() throws IOException {
             save();
             return new IriBooleanList(file, predicate, iriGraphsMap, bnodeGraphsMap,
-                    dictionaries, configuration);
+                    dictionaries, hardwood);
         }
 
     }
 
     private class IriBooleanListIterator extends RoResourceValueListIterator {
 
-        private IriBooleanListIterator(TypeDescription schema) {
-            super(schema);
+        private IriBooleanListIterator(RowReader rows) {
+            super(rows);
         }
     }
 }
