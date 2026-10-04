@@ -29,7 +29,6 @@ import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
 
-    private static final int BATCH_SIZE = 64 * 1024;
     private static final FileSchema SCHEMA = FileSchema.builder("iris")
             .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
             .addColumn(RoIriDictionary.IRI_VALUE, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
@@ -111,25 +110,37 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
+    private final SpillContext spill;
     private final Map<String, ProvisionalGroup<String>> byNamespace = new HashMap<>();
     private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
     private final List<String> namespaceOfGroup = new ArrayList<>();
+    private final List<DataDistribution> distributionOfGroup = new ArrayList<>();
 
     public TempIriDictionary(File out, Hardwood hardwood) {
+        this(out, hardwood, SpillContext.unbounded(hardwood));
+    }
+
+    public TempIriDictionary(File out, Hardwood hardwood, SpillContext spill) {
         super(out, hardwood);
+        this.spill = spill;
     }
 
     /**
      * @return the provisional id of the IRI, see {@link #finalId(long)}
      */
-    public long add(IRI iri) {
+    public long add(IRI iri) throws IOException {
         String namespace = RoIriDictionary.storedNamespace(iri);
         ProvisionalGroup<String> group = byNamespace.get(namespace);
         if (group == null) {
-            group = new ProvisionalGroup<>(groups.size());
+            // measured as values come in: the kind of dictionary has to be
+            // known before the merged values are written
+            DataDistribution distribution = new DataDistribution();
+            group = new ProvisionalGroup<>(groups.size(), ProvisionalGroup.STRINGS, spill,
+                    distribution::measure);
             byNamespace.put(namespace, group);
             groups.add(group);
             namespaceOfGroup.add(namespace);
+            distributionOfGroup.add(distribution);
         }
         return group.add(RoIriDictionary.storedLocalName(iri));
     }
@@ -152,78 +163,50 @@ public class TempIriDictionary extends TempDictionary {
      */
     public RoIriDictionary load() throws IOException {
         List<ProvisionalGroup<String>> biggestFirst = new ArrayList<>(groups);
-        biggestFirst.sort(Comparator.comparingInt((ProvisionalGroup<String> g) -> g.size()).reversed());
+        biggestFirst.sort(Comparator.comparingInt((ProvisionalGroup<String> g) -> g.provisionalIds()).reversed());
 
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
         for (ProvisionalGroup<String> group : biggestFirst) {
             RoNamespace roNamespace = namespaces.add(null, namespaceOfGroup.get(group.index()));
             final long namespaceBits = roNamespace.getId() << RoNamespaces.BITS_FOR_NAMESPACES;
-            List<String> sorted = group.sorted();
-            DataDistribution data = new DataDistribution();
-            sorted.forEach(data::measure);
+            DataDistribution data = distributionOfGroup.get(group.index());
 
             File iriFile = new File(out, roNamespace.getId() + "-iris");
             File bitmapFile = new File(out, roNamespace.getId() + "-prefixed-iris");
             File infoFile = new File(out, roNamespace.getId() + "-offsets");
             if (data.allNumericWithPrefix()) {
-                writeNamespaceWithPrefixedNumbersToDisk(sorted, bitmapFile, infoFile, data);
                 // the id is the number after the prefix
                 final int prefixLength = data.longestCommonPrefix == null ? 0 : data.longestCommonPrefix.length();
-                group.assignFinalIds(localName -> namespaceBits
-                        | Integer.parseInt(localName.substring(prefixLength)));
+                final RoaringBitmap numbers = new RoaringBitmap();
+                group.finish(localName -> {
+                    int number = Integer.parseInt(localName.substring(prefixLength));
+                    numbers.add(number);
+                    return namespaceBits | number;
+                });
+                writeNamespaceWithPrefixedNumbersToDisk(numbers, bitmapFile, infoFile, data);
                 iriDictionary.addPredixFollowedByBNumberDictionary(infoFile, bitmapFile, roNamespace);
             } else {
-                writeNamespaceWithLongIdsToDisk(sorted, iriFile);
                 // the id is the row in the sorted dictionary
-                group.assignFinalIds(sorted, position -> namespaceBits | position);
+                try (IdValueWriter writer = new IdValueWriter(iriFile, SCHEMA, RoIriDictionary.IRI_VALUE)) {
+                    group.finish(localName -> namespaceBits | writer.add(localName));
+                }
                 iriDictionary.addBasicRoIriNamespaceDictionary(ParquetTable.open(hardwood, iriFile), roNamespace);
             }
-            group.releaseValues();
         }
         return iriDictionary;
     }
 
-    private void writeNamespaceWithLongIdsToDisk(final List<String> sorted, File iriFile)
-            throws IOException {
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(iriFile, SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
-            for (int start = 0; start < sorted.size(); start += BATCH_SIZE) {
-                final int size = Math.min(BATCH_SIZE, sorted.size() - start);
-                final long[] ids = new long[size];
-                final byte[][] values = new byte[size][];
-                for (int i = 0; i < size; i++) {
-                    ids[i] = start + i;
-                    values[i] = sorted.get(start + i).getBytes(StandardCharsets.UTF_8);
-                }
-                writer.writeBatch(b -> b.longs(RoDictionary.ID, ids)
-                        .bytes(RoIriDictionary.IRI_VALUE, values));
-            }
-        }
-    }
-
-    private void writeNamespaceWithPrefixedNumbersToDisk(
-            final List<String> sorted, File bitmapFile, File infoFile,
-            DataDistribution data2) throws IOException {
-        RoaringBitmap map = new RoaringBitmap();
-        int start = 0;
-        String longestCommonPrefix = data2.longestCommonPrefix;
-        if (longestCommonPrefix != null) {
-            start = data2.longestCommonPrefix.length();
-        } else {
-            longestCommonPrefix = "";
-        }
-        for (int i = 0; i < sorted.size(); i++) {
-            map.add(Integer.parseInt(sorted.get(i).substring(start)));
-        }
-        try (DataOutputStream dos = new DataOutputStream(
-                new FileOutputStream(bitmapFile))) {
-            map.serialize(dos);
+    private void writeNamespaceWithPrefixedNumbersToDisk(RoaringBitmap numbers, File bitmapFile,
+            File infoFile, DataDistribution data) throws IOException {
+        String longestCommonPrefix = data.longestCommonPrefix == null ? "" : data.longestCommonPrefix;
+        try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(bitmapFile))) {
+            numbers.serialize(dos);
         }
         List<String> info = Arrays.asList(new String[]{
             String.valueOf(longestCommonPrefix.length()),
-            longestCommonPrefix, String.valueOf(data2.minLength),
-            String.valueOf(data2.maxLength)});
+            longestCommonPrefix, String.valueOf(data.minLength),
+            String.valueOf(data.maxLength)});
         Files.write(infoFile.toPath(), info, StandardCharsets.UTF_8);
-
     }
 }

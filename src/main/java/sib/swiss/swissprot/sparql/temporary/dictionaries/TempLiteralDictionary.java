@@ -32,15 +32,21 @@ public class TempLiteralDictionary extends TempDictionary {
     private final Map<IRI, ProvisionalGroup<String>> byDatatype = new HashMap<>();
     private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
     private final List<Literal> exampleOfGroup = new ArrayList<>();
+    private final SpillContext spill;
 
     public TempLiteralDictionary(File out, Hardwood hardwood) {
+        this(out, hardwood, SpillContext.unbounded(hardwood));
+    }
+
+    public TempLiteralDictionary(File out, Hardwood hardwood, SpillContext spill) {
         super(out, hardwood);
+        this.spill = spill;
     }
 
     /**
      * @return the provisional id of the literal, see {@link #finalId(long)}
      */
-    public long add(Literal literal) {
+    public long add(Literal literal) throws IOException {
         final Optional<String> language = literal.getLanguage();
         ProvisionalGroup<String> group = language.isPresent()
                 ? byLanguage.computeIfAbsent(language.get(), l -> newGroup(literal))
@@ -49,7 +55,7 @@ public class TempLiteralDictionary extends TempDictionary {
     }
 
     private ProvisionalGroup<String> newGroup(Literal literal) {
-        ProvisionalGroup<String> group = new ProvisionalGroup<>(groups.size());
+        ProvisionalGroup<String> group = new ProvisionalGroup<>(groups.size(), ProvisionalGroup.STRINGS, spill);
         groups.add(group);
         exampleOfGroup.add(literal);
         return group;
@@ -80,11 +86,10 @@ public class TempLiteralDictionary extends TempDictionary {
             LiteralBatch batch = new LiteralBatch(writer);
             for (ProvisionalGroup<String> group : groups) {
                 Literal example = exampleOfGroup.get(group.index());
-                List<String> sorted = group.sorted();
-                final long first = batch.addAll(sorted, example.getDatatype(),
-                        example.getLanguage().orElse(null));
-                group.assignFinalIds(sorted, position -> first + position);
-                group.releaseValues();
+                final byte[] datatype = stringAsUtf8ByteArray(example.getDatatype().stringValue());
+                final String language = example.getLanguage().orElse(null);
+                final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
+                group.finish(label -> batch.add(label, datatype, languageBytes));
             }
             batch.flush();
         }
@@ -110,24 +115,20 @@ public class TempLiteralDictionary extends TempDictionary {
         }
 
         /**
-         * @return the id of the first of the labels
+         * @param language null for a literal without
+         * @return the id of the literal
          */
-        private long addAll(List<String> labels, IRI datatype, String language) throws IOException {
-            final long first = index;
-            final byte[] datatypeBytes = stringAsUtf8ByteArray(datatype.stringValue());
-            final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
-            for (String label : labels) {
-                if (size == BATCH_SIZE) {
-                    flush();
-                }
-                ids[size] = index++;
-                this.labels[size] = stringAsUtf8ByteArray(label);
-                datatypes[size] = datatypeBytes;
-                languages[size] = languageBytes;
-                noLanguage[size] = language == null;
-                size++;
+        private long add(String label, byte[] datatype, byte[] language) throws IOException {
+            if (size == BATCH_SIZE) {
+                flush();
             }
-            return first;
+            ids[size] = index;
+            labels[size] = stringAsUtf8ByteArray(label);
+            datatypes[size] = datatype;
+            languages[size] = language;
+            noLanguage[size] = language == null;
+            size++;
+            return index++;
         }
 
         private void flush() throws IOException {

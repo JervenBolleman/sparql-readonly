@@ -78,6 +78,20 @@ public final class ParquetTable implements Closeable {
     }
 
     /**
+     * @return readers over all rows of the columns, in batches of at most
+     * {@code batchSize} rows, which the caller must close. Empty if this table
+     * has no rows.
+     */
+    public Optional<ColumnReaders> columns(int batchSize, String... columns) {
+        if (isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(reader.buildColumnReaders(ColumnProjection.columns(columns))
+                .batchSize(batchSize)
+                .build());
+    }
+
+    /**
      * Point lookup of the first row matching the filter. Unlike a
      * {@link RowReader}, which sizes its batches for scanning, this uses small
      * batches.

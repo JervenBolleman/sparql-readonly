@@ -245,6 +245,56 @@ public class RoStoreTest {
         }
     }
 
+    /**
+     * With a memory budget this small the dictionaries spill and merge many
+     * runs, the store must still return exactly what was loaded.
+     */
+    @Test
+    public void loadWithSpilling() throws IOException {
+        java.util.Random random = new java.util.Random(7);
+        java.util.Set<Statement> expected = new java.util.HashSet<>();
+        for (int i = 0; i < 20_000; i++) {
+            IRI subject = random.nextBoolean()
+                    ? VF.createIRI("http://example.org/numbered/", "P" + (10_000 + random.nextInt(5_000)))
+                    : VF.createIRI("http://example.org/named/", "name-" + random.nextInt(5_000));
+            IRI predicate = VF.createIRI("http://example.org/p" + random.nextInt(5));
+            Value object = switch (random.nextInt(5)) {
+                case 0 -> VF.createIRI("http://example.org/ns" + random.nextInt(20) + "/", "o" + random.nextInt(1_000));
+                case 1 -> VF.createLiteral("label " + random.nextInt(3_000));
+                case 2 -> VF.createLiteral("tekst " + random.nextInt(1_000), random.nextBoolean() ? "nl" : "de");
+                case 3 -> VF.createLiteral(new java.math.BigInteger("1" + "0".repeat(20)).add(java.math.BigInteger.valueOf(random.nextInt(500))));
+                default -> VF.createLiteral(-1 - random.nextInt(500));
+            };
+            expected.add(VF.createStatement(subject, predicate, object));
+        }
+        File file = folder.newFile("spill.nt");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            final RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
+            writer.startRDF();
+            expected.forEach(writer::handleStatement);
+            writer.endRDF();
+        }
+
+        RoStore store = new RoStore();
+        store.setDataDir(dir.toFile());
+        store.setLoadMemory(20_000);
+        store.init();
+        try {
+            store.load(file);
+            java.util.Set<Statement> back = new java.util.HashSet<>();
+            try (var connection = store.getConnection();
+                    CloseableIteration<? extends Statement> statements = connection
+                            .getStatements(null, null, null, true)) {
+                statements.forEachRemaining(st -> back.add(
+                        VF.createStatement(st.getSubject(), st.getPredicate(), st.getObject())));
+            }
+            assertEquals(expected.size(), back.size());
+            assertEquals(expected, back);
+        } finally {
+            store.shutDown();
+        }
+    }
+
     @Test
     public void taxonomyTripleLoad() throws IOException {
         RoStoreFactory fact = new RoStoreFactory();

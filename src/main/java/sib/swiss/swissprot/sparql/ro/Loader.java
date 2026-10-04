@@ -10,6 +10,10 @@ import java.util.Arrays;
  * <pre>
  * Loader &lt;store-directory&gt; &lt;rdf-file&gt;...
  * </pre>
+ *
+ * The system property {@code sparql.ro.loadMemoryMB} sets how much memory
+ * the dictionaries may use before they spill to disk, by default a quarter of
+ * the heap.
  */
 public final class Loader {
 
@@ -39,6 +43,10 @@ public final class Loader {
         }
         RoStore store = new RoStore();
         store.setDataDir(new File(args[0]));
+        String loadMemory = System.getProperty("sparql.ro.loadMemoryMB");
+        if (loadMemory != null) {
+            store.setLoadMemory(Long.parseLong(loadMemory) * 1024 * 1024);
+        }
         store.init();
         try {
             store.load(files);

@@ -135,6 +135,51 @@ in a hash map until its dictionary is written. That is fine for the taxonomy;
 for data with billions of distinct values option C replaces the maps, with
 the staging file and the remap kept as they are.
 
+## Bounded memory: spill and merge
+
+The distinct values no longer have to fit in memory. All dictionary groups
+share one budget (`SpillContext`; `RoStore.setLoadMemory`, or
+`-Dsparql.ro.loadMemoryMB` for the `Loader`; by default a quarter of the heap).
+When the values held in memory go over it, the largest groups write their
+values, sorted, with their provisional ids as a run (a small Parquet file),
+and start again empty, until half the budget is used.
+
+A value seen again after its group spilled gets another provisional id.
+Equal values meet when the runs are merged, and all their provisional ids get
+the same final id.
+
+- **In the background:** a merge thread merges a group's runs 8 at a time as
+  soon as it has 8, and merged runs merge again in turn, as in an LSM tree.
+  Parsing does not wait for it.
+- **When finishing a dictionary:** it waits for the group's pending merges,
+  merges whatever runs are left down to at most 8, then merges those with the
+  sorted values still in memory into one sorted stream. Each distinct value is
+  written to the dictionary and its final id recorded for all its provisional
+  ids.
+- Runs are read 1024 rows at a time, so reading many at once stays small.
+- Whether a namespace is a prefix followed by a number is decided as values
+  come in, since the kind of dictionary has to be known before the merged
+  values are written.
+- Big integers are now sorted and deduplicated like everything else.
+
+Measured on `taxonomy.rdf`, `-Xmx12g`:
+
+| Budget | Wall time | Max RSS | Runs |
+| --- | --- | --- | --- |
+| default (a quarter of the heap, 3 GB) | 141 s | 6.9 GB | none |
+| 64 MB | 114 s | 5.4 GB | 23 |
+
+Spilling is faster here: large hash maps cost more to grow and collect than
+sorting and writing smaller ones. Most of the remaining memory is write
+buffers: hardwood buffers up to 128 MB per open Parquet writer, and every
+predicate has a writer per triple list.
+
+Still in memory: the arrays from provisional to final id, 8 bytes per
+provisional id, and the remap pass, which reads them while it reads the
+staged triples in parse order. For billions of values these would move to
+disk too, with the staged triples sorted per position and merge joined with
+the (provisional, final) pairs: option C in full.
+
 ## Recommendation (before the implementation)
 
 1. Do **B** now. It removes the lookups, needs one parse, and is a contained

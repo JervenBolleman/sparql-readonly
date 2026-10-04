@@ -1,7 +1,6 @@
 package sib.swiss.swissprot.sparql.ro;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,6 +62,19 @@ final class LoadingHandler extends AbstractRDFHandler {
 
     @Override
     public void handleStatement(Statement st) throws RDFHandlerException {
+        try {
+            stage(st);
+        } catch (IOException e) {
+            throw new RDFHandlerException("Could not stage " + st, e);
+        }
+        if (++statements % 1_000_000 == 0) {
+            double seconds = (System.nanoTime() - started) / 1e9;
+            LOGGER.log(Level.INFO, "{0} statements parsed, {1} per second",
+                    new Object[]{statements, Math.round(statements / seconds)});
+        }
+    }
+
+    private void stage(Statement st) throws IOException {
         identify(st.getSubject());
         Kind subjectKind = kind;
         long subject = id;
@@ -77,22 +89,13 @@ final class LoadingHandler extends AbstractRDFHandler {
             contextKind = kind;
             context = id;
         }
-        try {
-            staged.add(subjectKind, subject, predicate, objectKind, object, contextKind, context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        if (++statements % 1_000_000 == 0) {
-            double seconds = (System.nanoTime() - started) / 1e9;
-            LOGGER.log(Level.INFO, "{0} statements parsed, {1} per second",
-                    new Object[]{statements, Math.round(statements / seconds)});
-        }
+        staged.add(subjectKind, subject, predicate, objectKind, object, contextKind, context);
     }
 
     /**
      * Sets {@link #kind} and {@link #id} for the value.
      */
-    private void identify(Value value) {
+    private void identify(Value value) throws IOException {
         if (value instanceof IRI iri) {
             set(Kind.IRI, iris.add(iri));
         } else if (value instanceof BNode bnode) {
@@ -104,7 +107,7 @@ final class LoadingHandler extends AbstractRDFHandler {
         }
     }
 
-    private void identify(Literal literal) {
+    private void identify(Literal literal) throws IOException {
         IRI datatype = literal.getDatatype();
         // a value that is not valid for its datatype is kept as it is
         try {

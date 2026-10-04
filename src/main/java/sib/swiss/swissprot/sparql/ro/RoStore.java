@@ -6,9 +6,11 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -38,6 +40,7 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
+import sib.swiss.swissprot.sparql.temporary.dictionaries.SpillContext;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIntegerDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
@@ -56,6 +59,11 @@ public class RoStore extends AbstractSail {
 	private RoLiteralDict literalDict;
 	private RoBigIntegerDict integerDict;
 	protected Hardwood hardwood;
+	/**
+	 * How much memory the distinct values may take while loading, before they
+	 * spill to disk.
+	 */
+	private long loadMemory = Runtime.getRuntime().maxMemory() / 4;
 
 	public RoStore() {
 		this.federatedServiceResolver = new SPARQLServiceResolver();
@@ -175,6 +183,14 @@ public class RoStore extends AbstractSail {
 	}
 
 	/**
+	 * @param bytes the memory the distinct values of a load may take before
+	 * they are spilled to disk, by default a quarter of the maximum heap
+	 */
+	public void setLoadMemory(long bytes) {
+		this.loadMemory = bytes;
+	}
+
+	/**
 	 * Loads the files in one parse. Values get provisional ids, the triples
 	 * are staged with them, and once the dictionaries are sorted and written
 	 * the staged triples are stored with their final ids.
@@ -183,15 +199,15 @@ public class RoStore extends AbstractSail {
 	 */
 	public void load(File... files)
 			throws RDFParseException, RDFHandlerException, IOException {
-		final TempLiteralDictionary literals = new TempLiteralDictionary(
-				subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), hardwood);
-		final TempIriDictionary iris = new TempIriDictionary(
-				subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood);
-		final TempIntegerDictionary integers = new TempIntegerDictionary(
-				subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES),
-				hardwood);
 		final File stagingFile = new File(getDataDir(), "staged-triples");
-		try {
+		try (SpillContext spill = new SpillContext(loadMemory, new File(getDataDir(), "spill"),
+				hardwood, true)) {
+			final TempLiteralDictionary literals = new TempLiteralDictionary(
+					subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), hardwood, spill);
+			final TempIriDictionary iris = new TempIriDictionary(
+					subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood, spill);
+			final TempIntegerDictionary integers = new TempIntegerDictionary(
+					subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), hardwood, spill);
 			try (StagedTriples staged = new StagedTriples(stagingFile)) {
 				parse(files, iris, literals, integers, staged);
 			}
@@ -282,6 +298,30 @@ public class RoStore extends AbstractSail {
 			this.integers = integers;
 		}
 
+		/**
+		 * Big integers are rare and repeat: read from the dictionary, with a
+		 * cache.
+		 */
+		private final Map<Long, RoBigIntegerLiteral> bigIntegers = new LinkedHashMap<>(1024, 0.75f, true) {
+			@Override
+			protected boolean removeEldestEntry(Map.Entry<Long, RoBigIntegerLiteral> eldest) {
+				return size() > 10_000;
+			}
+		};
+
+		private RoBigIntegerLiteral bigInteger(long finalId) {
+			RoBigIntegerLiteral literal = bigIntegers.get(finalId);
+			if (literal == null) {
+				try {
+					literal = integerDict.getFromId(finalId);
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+				bigIntegers.put(finalId, literal);
+			}
+			return literal;
+		}
+
 		RoValue value(StagedTriples.Kind kind, long id) {
 			return switch (kind) {
 				case IRI -> new RoIri(iris.finalId(id), iriDict);
@@ -290,7 +330,7 @@ public class RoStore extends AbstractSail {
 				case INT -> new RoIntegerLiteral(id);
 				case BOOLEAN -> new RoBooleanLiteral(id != 0);
 				case INTEGER -> new RoBigIntegerLiteral(id);
-				case BIG_INTEGER -> new RoBigIntegerLiteral(integers.finalId(id), integers.value(id));
+				case BIG_INTEGER -> bigInteger(integers.finalId(id));
 				case NONE -> throw new IllegalArgumentException("No value");
 			};
 		}
