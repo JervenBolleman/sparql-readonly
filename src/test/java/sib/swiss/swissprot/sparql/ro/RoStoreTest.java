@@ -253,6 +253,7 @@ public class RoStoreTest {
         RoStore store = fact.getSail(config);
         store.init();
         store.load(new File("test_data", "taxonomy.rdf"), new File("test_data", "taxonomy-hierarchy.rdf"));
-        assertEquals(40_000_000, store.getConnection().size());
+        // 16 555 403 in taxonomy.rdf, 39 317 130 in taxonomy-hierarchy.rdf
+        assertEquals(55_872_533, store.getConnection().size());
     }
 }
