@@ -12,8 +12,7 @@ import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.vocabulary.RDF;
-import org.eclipse.rdf4j.model.vocabulary.XSD;
+import org.eclipse.rdf4j.model.util.Values;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
@@ -23,32 +22,13 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
 
     public static final String PATH_NAME = "literals";
     public static final String LABEL = "label";
-    public static final String DATATYPE_ID = "datatype_id";
+    public static final String DATATYPE = "datatype";
     public static final String LANGUAGE = "language";
-
-    private static final IRI[] DATA_TYPES = new IRI[]{XSD.ANYURI,
-        XSD.BASE64BINARY, XSD.BOOLEAN, XSD.BYTE,
-        XSD.DATE, XSD.DATETIME, XSD.DAYTIMEDURATION,
-        XSD.DECIMAL, XSD.DOUBLE, XSD.DURATION,
-        XSD.ENTITIES, XSD.ENTITY, XSD.FLOAT,
-        XSD.GDAY, XSD.GMONTH, XSD.GMONTHDAY,
-        XSD.GYEAR, XSD.GYEARMONTH, XSD.HEXBINARY,
-        XSD.ID, XSD.IDREF, XSD.IDREFS, XSD.INT,
-        XSD.INTEGER, XSD.LANGUAGE, XSD.LONG,
-        XSD.NAME, XSD.NCNAME, XSD.NEGATIVE_INTEGER,
-        XSD.NMTOKEN, XSD.NMTOKENS,
-        XSD.NON_NEGATIVE_INTEGER, XSD.NON_POSITIVE_INTEGER,
-        XSD.NORMALIZEDSTRING, XSD.NOTATION,
-        XSD.POSITIVE_INTEGER, XSD.QNAME, XSD.SHORT,
-        XSD.STRING, XSD.TIME, XSD.TOKEN,
-        XSD.UNSIGNED_BYTE, XSD.UNSIGNED_INT,
-        XSD.UNSIGNED_LONG, XSD.UNSIGNED_SHORT,
-        XSD.YEARMONTHDURATION};
 
     public static final FileSchema SCHEMA = FileSchema.builder(PATH_NAME)
             .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
             .addColumn(LABEL, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
-            .addColumn(DATATYPE_ID, PhysicalType.INT64, RepetitionType.REQUIRED)
+            .addColumn(DATATYPE, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
             .addColumn(LANGUAGE, PhysicalType.BYTE_ARRAY, RepetitionType.OPTIONAL, new LogicalType.StringType())
             .build();
 
@@ -66,7 +46,7 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
                     FilterPredicate.eq(LANGUAGE, language.get()));
         } else {
             filter = FilterPredicate.and(FilterPredicate.eq(LABEL, label),
-                    FilterPredicate.eq(DATATYPE_ID, (long) datatypeCode(value.getDatatype())),
+                    FilterPredicate.eq(DATATYPE, value.getDatatype().stringValue()),
                     FilterPredicate.isNull(LANGUAGE));
         }
         return findId(filter).map(id -> new RoSimpleLiteral(id, this));
@@ -82,15 +62,12 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public IRI dataType(long id) {
-        if (language(id).isPresent()) {
-            return RDF.LANGSTRING;
-        }
-        Optional<Long> datatype = readLongAt(id, DATATYPE_ID);
+        Optional<String> datatype = readStringAt(id, DATATYPE);
         if (datatype.isEmpty()) {
             Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
             return null;
         }
-        return DATA_TYPES[datatype.get().intValue()];
+        return Values.iri(datatype.get());
     }
 
     public RoLiteral get(long id) {
@@ -99,14 +76,5 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
 
     public Optional<String> language(long id) {
         return readStringAt(id, LANGUAGE).filter(s -> !s.isEmpty());
-    }
-
-    public static int datatypeCode(IRI datatype) {
-        for (int i = 0; i < DATA_TYPES.length; i++) {
-            if (DATA_TYPES[i].equals(datatype)) {
-                return i;
-            }
-        }
-        return -1;
     }
 }

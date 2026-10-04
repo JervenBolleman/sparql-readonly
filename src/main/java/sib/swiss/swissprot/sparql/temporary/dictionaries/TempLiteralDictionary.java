@@ -17,13 +17,14 @@ import java.util.stream.Stream;
 import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.model.vocabulary.XSD;
 
 import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
-import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.DATATYPE_ID;
+import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.DATATYPE;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LABEL;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LANGUAGE;
 
@@ -44,7 +45,8 @@ public class TempLiteralDictionary extends TempDictionary {
             return;
         }
 
-        final byte[] label = stringAsUtf8ByteArray(subject.getLabel());
+        // one label per line
+        final byte[] label = stringAsUtf8ByteArray(escapeLine(subject.getLabel()));
         if (subject.getLanguage().isPresent()) {
             final String language = subject.getLanguage().get();
             FileOutputStream fos = languages.get(language);
@@ -98,14 +100,14 @@ public class TempLiteralDictionary extends TempDictionary {
     }
 
     private void writeLanguageStrings(LiteralBatch batch) throws IOException {
-        int datatypeCode = RoLiteralDict.datatypeCode(XSD.LANGUAGE);
         for (String language : languages.keySet()) {
             File tempFile = languageFile(language);
             try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
                 Stream<String> labels = br.lines()
+                        .map(TempDictionary::unescapeLine)
                         .sorted(Collator.getInstance(Locale.forLanguageTag(language)))
                         .distinct();
-                batch.addAll(labels.iterator(), datatypeCode, language);
+                batch.addAll(labels.iterator(), RDF.LANGSTRING, language);
             }
             if (!tempFile.delete()) {
                 Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete lang temp file " + language);
@@ -115,13 +117,13 @@ public class TempLiteralDictionary extends TempDictionary {
 
     private void writeDatatypesStrings(LiteralBatch batch) throws IOException {
         for (IRI datatype : datatypes.keySet()) {
-            int datatypeCode = RoLiteralDict.datatypeCode(datatype);
             File tempFile = datatypeFile(datatype);
             try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
                 Stream<String> labels = br.lines()
+                        .map(TempDictionary::unescapeLine)
                         .sorted()
                         .distinct();
-                batch.addAll(labels.iterator(), datatypeCode, null);
+                batch.addAll(labels.iterator(), datatype, null);
             }
             if (!tempFile.delete()) {
                 Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete datatype temp file " + datatype);
@@ -137,7 +139,7 @@ public class TempLiteralDictionary extends TempDictionary {
         private final ParquetTable.Writer writer;
         private final long[] ids = new long[BATCH_SIZE];
         private final byte[][] labels = new byte[BATCH_SIZE][];
-        private final long[] datatypeIds = new long[BATCH_SIZE];
+        private final byte[][] datatypes = new byte[BATCH_SIZE][];
         private final byte[][] languages = new byte[BATCH_SIZE][];
         private final boolean[] noLanguage = new boolean[BATCH_SIZE];
         private int size;
@@ -147,7 +149,8 @@ public class TempLiteralDictionary extends TempDictionary {
             this.writer = writer;
         }
 
-        private void addAll(Iterator<String> labels, int datatypeCode, String language) throws IOException {
+        private void addAll(Iterator<String> labels, IRI datatype, String language) throws IOException {
+            final byte[] datatypeBytes = stringAsUtf8ByteArray(datatype.stringValue());
             final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
             while (labels.hasNext()) {
                 if (size == BATCH_SIZE) {
@@ -155,7 +158,7 @@ public class TempLiteralDictionary extends TempDictionary {
                 }
                 ids[size] = index++;
                 this.labels[size] = stringAsUtf8ByteArray(labels.next());
-                datatypeIds[size] = datatypeCode;
+                datatypes[size] = datatypeBytes;
                 languages[size] = languageBytes;
                 noLanguage[size] = language == null;
                 size++;
@@ -168,12 +171,12 @@ public class TempLiteralDictionary extends TempDictionary {
             }
             final long[] i = Arrays.copyOf(ids, size);
             final byte[][] l = Arrays.copyOf(labels, size);
-            final long[] d = Arrays.copyOf(datatypeIds, size);
+            final byte[][] d = Arrays.copyOf(datatypes, size);
             final byte[][] lang = Arrays.copyOf(languages, size);
             final boolean[] nulls = Arrays.copyOf(noLanguage, size);
             writer.writeBatch(b -> b.longs(RoDictionary.ID, i)
                     .bytes(LABEL, l)
-                    .longs(DATATYPE_ID, d)
+                    .bytes(DATATYPE, d)
                     .bytes(LANGUAGE, lang, nulls));
             size = 0;
         }
