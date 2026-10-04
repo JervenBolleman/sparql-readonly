@@ -150,16 +150,6 @@ public class RoConnection implements SailConnection {
 		}
 	}
 
-	// @Override
-	// public void begin() throws SailException {
-	// throw new SailException("RO sparql can not be updated via SPARQL");
-	// }
-	//
-	// @Override
-	// public void prepare() throws SailException {
-	// // TODO Auto-generated method stub
-	//
-	// }
 	@Override
 	public void commit() throws SailException {
 		throw new SailException("RO sparql can not be updated via SPARQL");
@@ -168,14 +158,9 @@ public class RoConnection implements SailConnection {
 
 	@Override
 	public void rollback() throws SailException {
-		// TODO Auto-generated method stub
 
 	}
 
-	// @Override
-	// public boolean isActive() throws UnknownSailTransactionStateException {
-	// return false;
-	// }
 	@Override
 	public void addStatement(Resource subj, IRI pred, Value obj,
 			Resource... contexts) throws SailException {
@@ -190,31 +175,6 @@ public class RoConnection implements SailConnection {
 
 	}
 
-	// @Override
-	// public void startUpdate(UpdateContext op) throws SailException {
-	// throw new SailException("RO sparql can not be updated via SPARQL");
-	//
-	// }
-	//
-	// @Override
-	// public void addStatement(UpdateContext op, Resource subj, URI pred,
-	// Value obj, Resource... contexts) throws SailException {
-	// throw new SailException("RO sparql can not be updated via SPARQL");
-	//
-	// }
-	//
-	// @Override
-	// public void removeStatement(UpdateContext op, Resource subj, URI pred,
-	// Value obj, Resource... contexts) throws SailException {
-	// throw new SailException("RO sparql can not be updated via SPARQL");
-	//
-	// }
-	//
-	// @Override
-	// public void endUpdate(UpdateContext op) throws SailException {
-	// throw new SailException("RO sparql can not be updated via SPARQL");
-	//
-	// }
 	@Override
 	public void clear(Resource... contexts) throws SailException {
 		throw new SailException("RO sparql can not be updated via SPARQL");
@@ -318,13 +278,11 @@ public class RoConnection implements SailConnection {
 	@Override
 	public void begin(IsolationLevel arg0)
 			throws UnknownSailTransactionStateException, SailException {
-		// TODO Auto-generated method stub
 
 	}
 
 	@Override
 	public void flush() throws SailException {
-		// TODO Auto-generated method stub
 
 	}
 
@@ -332,13 +290,13 @@ public class RoConnection implements SailConnection {
 	public boolean hasStatement(Resource subj, IRI pred, Value obj,
 			boolean includeInferred, Resource... contexts)
 			throws SailException {
-		// TODO Auto-generated method stub
+
 		return false;
 	}
 
 	@Override
 	public boolean pendingRemovals() {
-		// TODO Auto-generated method stub
+
 		return false;
 	}
 
