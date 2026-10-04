@@ -59,7 +59,7 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 		}
 		if (namespace.equals(roNamespace.getName())) {
 			return findId(FilterPredicate.eq(RoIriDictionary.IRI_VALUE, localName))
-					.map(id -> new RoIri(nameSpacedId(id), roIriDictionary));
+					.map(id -> new RoIri(nameSpacedId(id), roIriDictionary, iri));
 		}
 		return Optional.empty();
 	}

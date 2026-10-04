@@ -13,12 +13,28 @@ public class RoIri implements IRI, RoResource {
 	private static final long serialVersionUID = 1L;
 	private final RoIriDictionary dict;
 	private final long id;
+	/**
+	 * The hash of the IRI string, as {@link IRI#hashCode()} requires. Zero
+	 * until known, computing it needs a dictionary lookup.
+	 */
+	private int hash;
 
 	public RoIri(long id, RoIriDictionary dict) {
 		super();
 		this.id = id;
 		assert dict != null;
 		this.dict = dict;
+	}
+
+	/**
+	 * For an IRI found in the dictionary, saves looking up its string to hash
+	 * it.
+	 *
+	 * @param found the IRI that has this id
+	 */
+	public RoIri(long id, RoIriDictionary dict, IRI found) {
+		this(id, dict);
+		this.hash = found.stringValue().hashCode();
 	}
 
 	@Override
@@ -65,7 +81,12 @@ public class RoIri implements IRI, RoResource {
 
 	@Override
 	public int hashCode() {
-		return (int) id;
+		int h = hash;
+		if (h == 0) {
+			h = stringValue().hashCode();
+			hash = h;
+		}
+		return h;
 	}
 
 	@Override

@@ -52,6 +52,28 @@ public class RoIriDictionaryTest {
         assertEquals(RDF.ALT, foundAlt.get());
     }
 
+    @Test
+    public void hashCodeIsThatOfTheIriString() throws IOException {
+        final IRI basic = RDF.TYPE;
+        final IRI numbered = SimpleValueFactory.getInstance().createIRI("http://example.org/test/", "GO_00005");
+        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        temp.add(basic);
+        temp.add(RDF.VALUE);
+        temp.add(numbered);
+        temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/test/", "GO_00010"));
+        temp.close();
+        RoIriDictionary roIriDictionary = temp.load();
+        for (IRI iri : new IRI[]{basic, numbered}) {
+            final RoIri found = roIriDictionary.find(iri).get();
+            assertEquals(iri.hashCode(), found.hashCode());
+            // as read back from a triple list, without the original string
+            final RoIri decoded = new RoIri(found.getLongId(), roIriDictionary);
+            assertEquals(iri.hashCode(), decoded.hashCode());
+            assertTrue(new java.util.HashSet<>(java.util.List.of(iri)).contains(decoded));
+            assertTrue(new java.util.HashSet<>(java.util.List.of(decoded)).contains(iri));
+        }
+    }
+
     @After
     public void after() throws Exception {
         hardwood.close();

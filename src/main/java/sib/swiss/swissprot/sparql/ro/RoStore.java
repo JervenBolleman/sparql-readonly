@@ -260,12 +260,7 @@ public class RoStore extends AbstractSail {
 	 * with it.
 	 */
 	public RoPredicateStore getPredicateStore(IRI predicate) {
-		if (predicate instanceof RoIri) {
-			return stores.get(predicate);
-		}
-		// The stores are keyed on RoIri, whose hashCode is not that of other
-		// IRI implementations.
-		return iriDict.find(predicate).map(stores::get).orElse(null);
+		return stores.get(predicate);
 	}
 
 	@Override

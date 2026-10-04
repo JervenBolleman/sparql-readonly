@@ -135,7 +135,7 @@ public class RoIriPrefixFollowedByNumberDictionary
                             .substring(prefix.length()));
                     if (bitmap.contains(id)) {
                         return Optional.of(
-                                new RoIri(nameSpacedId(id), roIriDictionary));
+                                new RoIri(nameSpacedId(id), roIriDictionary, predicate));
                     }
                 } catch (NumberFormatException e) {
                     return Optional.empty();
