@@ -42,6 +42,15 @@ public final class ParquetTable implements Closeable {
             .rowGroupTargetRows(LOOKUP_BATCH_SIZE)
             .build();
 
+    /**
+     * For files written in bulk while many others are open, such as the
+     * triple lists of every predicate: hardwood buffers a row group per
+     * writer, by default up to 128 MB.
+     */
+    public static final WriterConfig LIST_CONFIG = WriterConfig.builder()
+            .rowGroupBufferTargetBytes(4L << 20)
+            .build();
+
     private final ParquetFileReader reader;
 
     private ParquetTable(ParquetFileReader reader) {

@@ -82,7 +82,7 @@ final class StagedTriples implements Closeable {
     private long count;
 
     StagedTriples(File file) throws IOException {
-        this.writer = new ParquetTable.Writer(file, SCHEMA);
+        this.writer = new ParquetTable.Writer(file, SCHEMA, ParquetTable.LIST_CONFIG);
     }
 
     void add(Kind subjectKind, long subject, long predicate, Kind objectKind,

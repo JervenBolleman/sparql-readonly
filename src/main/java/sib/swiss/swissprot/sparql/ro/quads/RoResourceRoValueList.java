@@ -187,12 +187,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         protected final Map<RoIri, RoaringBitmap> iriGraphsMap = new HashMap<>();
         protected final Map<RoBnode, RoaringBitmap> bnodeGraphsMap = new HashMap<>();
         private static final int BATCH_SIZE = 64 * 1024;
-        protected final ParquetTable.Writer writer;
+        // Most lists of a predicate stay empty: their writer and batch only
+        // take memory once a triple arrives, and an empty list has no file.
+        private ParquetTable.Writer writer;
         protected long numberOfTriplesInList;
         protected final RoDictionaries dictionaries;
         protected final Hardwood hardwood;
-        private final long[] subjects = new long[BATCH_SIZE];
-        private final long[] objects = new long[BATCH_SIZE];
+        private long[] subjects;
+        private long[] objects;
         private int inBatch;
 
         protected AbstractBuilder(File file, RoIri predicate,
@@ -201,7 +203,6 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             super();
             this.file = file;
             this.predicate = predicate;
-            this.writer = new ParquetTable.Writer(file, SCHEMA);
             this.dictionaries = dictionaries;
             this.hardwood = hardwood;
         }
@@ -227,7 +228,10 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         public void add(S subject, O object,
                 RoResource context) throws IOException {
-            if (inBatch == BATCH_SIZE) {
+            if (subjects == null) {
+                subjects = new long[BATCH_SIZE];
+                objects = new long[BATCH_SIZE];
+            } else if (inBatch == BATCH_SIZE) {
                 flush();
             }
             numberOfTriplesInList++;
@@ -295,6 +299,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             if (inBatch == 0) {
                 return;
             }
+            if (writer == null) {
+                writer = new ParquetTable.Writer(file, SCHEMA, ParquetTable.LIST_CONFIG);
+            }
             final long[] s = Arrays.copyOf(subjects, inBatch);
             final long[] o = Arrays.copyOf(objects, inBatch);
             writer.writeBatch(b -> b.longs(SUBJECT, s).longs(OBJECT, o));
@@ -303,7 +310,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         protected void save() throws IOException {
             flush();
-            writer.close();
+            if (writer != null) {
+                writer.close();
+            } else if (file.exists() && !file.delete()) {
+                // an empty list has no file, not one of an earlier load
+                throw new IOException("Could not delete " + file);
+            }
+            subjects = null;
+            objects = null;
             saveContextBitmaps();
             saveNamespace(dictionaries.getIriDict().getNamespaces(), file);
         }

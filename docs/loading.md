@@ -170,9 +170,34 @@ Measured on `taxonomy.rdf`, `-Xmx12g`:
 | 64 MB | 114 s | 5.4 GB | 23 |
 
 Spilling is faster here: large hash maps cost more to grow and collect than
-sorting and writing smaller ones. Most of the remaining memory is write
-buffers: hardwood buffers up to 128 MB per open Parquet writer, and every
-predicate has a writer per triple list.
+sorting and writing smaller ones.
+
+### Write buffers
+
+hardwood buffers a row group per open writer, by default up to 128 MB, and a
+load has a writer open per non-empty triple list of every predicate, plus the
+staging file. Two changes cap this:
+
+- A triple list creates its writer and batch arrays at its first triple. Most
+  of the 13 lists of a predicate stay empty and now cost nothing, and have no
+  file.
+- Triple lists and the staging file cut a row group at 4 MB
+  (`ParquetTable.LIST_CONFIG`), about 256 000 triples.
+
+`taxonomy.rdf` with a 64 MB dictionary budget:
+
+| Heap | Row group target | Wall time | Max RSS |
+| --- | --- | --- | --- |
+| 12 GB | 128 MB (before) | 114 s | 5.4 GB |
+| 1 GB | 16 MB | 128 s | 1.3 GB |
+| 512 MB | 16 MB | did not finish: old generation full | |
+| 1 GB | 4 MB | 138 s | 1.4 GB |
+| 512 MB | 4 MB | 144 s | 0.8 GB |
+
+Writer memory still grows with the number of non-empty lists open at once,
+about 4 MB plus hardwood's growth slack each. With the hundreds of predicates
+the README allows, writing the lists one predicate at a time from staged
+triples sorted by predicate would make it constant.
 
 Still in memory: the arrays from provisional to final id, 8 bytes per
 provisional id, and the remap pass, which reads them while it reads the
