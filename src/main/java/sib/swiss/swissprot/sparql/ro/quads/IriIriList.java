@@ -9,6 +9,7 @@ import dev.hardwood.reader.RowReader;
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
@@ -23,6 +24,16 @@ public class IriIriList extends RoResourceRoValueList<RoIri, RoIri> {
 
     public IriIriList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
         super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.IRI;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.IRI;
     }
 
     @Override

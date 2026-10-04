@@ -12,6 +12,7 @@ import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
@@ -38,6 +39,16 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
     @Override
     protected RoBooleanLiteral getObject(RowReader row) {
         return new RoBooleanLiteral(row.getLong(OBJECT) == 1L);
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.BNODE;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.BOOLEAN;
     }
 
     @Override

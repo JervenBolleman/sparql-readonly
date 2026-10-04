@@ -7,6 +7,7 @@ import java.util.Optional;
 import javax.xml.datatype.XMLGregorianCalendar;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.datatypes.XMLDatatypeUtil;
@@ -66,7 +67,8 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
         if (Literals.isLanguageLiteral(this)) {
             sb.append('@');
             sb.append(getLanguage().get());
-        } else {
+        } else if (!XSD.STRING.equals(getDatatype())) {
+            // as RDF4J, a plain string shows without its datatype
             sb.append("^^<");
             sb.append(getDatatype().toString());
             sb.append(">");

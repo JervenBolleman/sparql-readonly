@@ -87,6 +87,17 @@ public final class ParquetTable implements Closeable {
     }
 
     /**
+     * @return a reader over the rows matching the filter exactly, which the
+     * caller must close. Empty if this table has no rows.
+     */
+    public Optional<RowReader> rows(FilterPredicate filter) {
+        if (isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(reader.buildRowReader().filter(filter).build());
+    }
+
+    /**
      * @return readers over all rows of the columns, in batches of at most
      * {@code batchSize} rows, which the caller must close. Empty if this table
      * has no rows.

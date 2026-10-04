@@ -12,11 +12,14 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
+import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.vocabulary.XSD;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBigIntegerList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBnodeList;
@@ -45,6 +48,7 @@ import sib.swiss.swissprot.sparql.ro.values.RoValue;
 public class RoPredicateStore implements Iterable<Statement>, Closeable {
 
     private final RoIri predicate;
+    private final RoDictionaries dictionaries;
 
     private final IriIriList iriIriList;
 
@@ -87,6 +91,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
                 new File(directory, FILE_TO_STORE_PREDICATE_ID)))) {
             predicate = new RoIri(fr.readLong(), dictionaries.getIriDict());
         }
+        this.dictionaries = dictionaries;
 
         this.iriIriList = new IriIriList(new File(directory, FILE_TO_STORE_IRI_IRI),
                 predicate, dictionaries, hardwood);
@@ -117,7 +122,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
                 new File(directory, FILE_TO_STORE_BNODE_LITERAL), predicate, dictionaries, hardwood);
     }
 
-    private RoPredicateStore(RoIri predicate,
+    private RoPredicateStore(RoIri predicate, RoDictionaries dictionaries,
             BnodeIriList bNodeIriList,
             BnodeBnodeList bnodeBnodeList,
             BnodeIntegerList bNodeIntList,
@@ -149,6 +154,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
         this.bNodeLiteralList = bNodeLiteralList;
         
         this.predicate = predicate;
+        this.dictionaries = dictionaries;
     }
 
     public static File initDirectory(File directory, IRI predicate) {
@@ -170,31 +176,56 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
         return stream().iterator();
     }
 
+    private List<RoResourceRoValueList<?, ?>> lists() {
+        return List.of(bNodeBnodeList, bNodeIriList, bNodeIntList, bNodeBooleanList,
+                iriBnodeList, iriIriList, iriIntegerList, iriLiteralList, iriBooleanList,
+                iriBigIntegerList, bNodeBigIntegerList, bNodeStringList, bNodeLiteralList);
+    }
+
     public Stream<Statement> stream() {
-        return Stream.of(
-                bNodeBnodeList, 
-                bNodeIriList, 
-                bNodeIntList, 
-                bNodeBooleanList, 
-                iriBnodeList, 
-                iriIriList, 
-                iriIntegerList, 
-                iriLiteralList,
-                iriBooleanList,
-                iriBigIntegerList,
-                bNodeBigIntegerList,
-                bNodeStringList,
-                bNodeLiteralList)
-                .flatMap(RoResourceRoValueList::stream);
+        return lists().stream().flatMap(RoResourceRoValueList::stream);
+    }
+
+    /**
+     * The triples of this predicate with the subject and object, selected in
+     * the triple lists that can hold them.
+     *
+     * @param subject null for any
+     * @param object null for any
+     */
+    public Stream<Statement> stream(Resource subject, Value object) {
+        if (subject == null && object == null) {
+            return stream();
+        }
+        final Term s;
+        if (subject == null) {
+            s = null;
+        } else {
+            Optional<Term> found = Term.of(subject, dictionaries);
+            if (found.isEmpty()) {
+                return Stream.empty();
+            }
+            s = found.get();
+        }
+        final Term o;
+        if (object == null) {
+            o = null;
+        } else {
+            Optional<Term> found = Term.of(object, dictionaries);
+            if (found.isEmpty()) {
+                return Stream.empty();
+            }
+            o = found.get();
+        }
+        return lists().stream()
+                .filter(list -> s == null || list.subjectKind() == s.kind())
+                .filter(list -> o == null || list.objectKind() == o.kind())
+                .flatMap(list -> list.stream(s, o));
     }
 
     @Override
     public void close() throws IOException {
-        for (RoResourceRoValueList<?, ?> list : List.of(bNodeBnodeList, bNodeIriList,
-                bNodeIntList, bNodeBooleanList, iriBnodeList, iriIriList,
-                iriIntegerList, iriLiteralList, iriBooleanList,
-                iriBigIntegerList, bNodeBigIntegerList, bNodeStringList,
-                bNodeLiteralList)) {
+        for (RoResourceRoValueList<?, ?> list : lists()) {
             list.close();
         }
     }
@@ -204,6 +235,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
         private final IriIriList.Builder iriIriBuilder;
         private final File directory;
         private final RoIri predicate;
+        private final RoDictionaries dictionaries;
         private final BnodeBnodeList.Builder bNodeBnodeBuilder;
         private final BnodeIriList.Builder bNodeIriBuilder;
         private final BnodeBooleanList.Builder bNodeBooleanBuilder;
@@ -221,6 +253,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
         protected Builder(File directory, RoIri predicate,
                 RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
             this.directory = directory;
+            this.dictionaries = dictionaries;
             this.predicate = predicate;
             this.iriIriBuilder = new IriIriList.Builder(
                     new File(directory, FILE_TO_STORE_IRI_IRI), predicate,
@@ -361,7 +394,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
                             new File(directory, FILE_TO_STORE_PREDICATE_ID)))) {
                 fw.writeLong(predicate.getLongId());
             }
-            return new RoPredicateStore(predicate,
+            return new RoPredicateStore(predicate, dictionaries,
                     bNodeIriBuilder.build(),
                     bNodeBnodeBuilder.build(),
                     bNodeIntegerBuilder.build(),

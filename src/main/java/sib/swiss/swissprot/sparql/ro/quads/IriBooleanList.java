@@ -9,6 +9,7 @@ import dev.hardwood.Hardwood;
 import dev.hardwood.reader.RowReader;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
@@ -36,6 +37,16 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
     @Override
     protected RoBooleanLiteral getObject(RowReader row) {
         return new RoBooleanLiteral(row.getLong(OBJECT) == 1L);
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.IRI;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.BOOLEAN;
     }
 
     @Override

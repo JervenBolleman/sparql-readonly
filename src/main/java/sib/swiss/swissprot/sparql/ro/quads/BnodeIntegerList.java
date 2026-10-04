@@ -8,6 +8,7 @@ import dev.hardwood.reader.RowReader;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
@@ -32,6 +33,16 @@ public class BnodeIntegerList extends RoResourceRoValueList<RoBnode, RoIntegerLi
     @Override
     protected RoIntegerLiteral getObject(RowReader row) {
         return new RoIntegerLiteral(row.getLong(OBJECT));
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.BNODE;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.INT;
     }
 
     @Override

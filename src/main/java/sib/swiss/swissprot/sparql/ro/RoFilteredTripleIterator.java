@@ -3,8 +3,7 @@ package sib.swiss.swissprot.sparql.ro;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.List;
 import java.util.stream.Stream;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -19,40 +18,26 @@ public class RoFilteredTripleIterator implements
 
     final Iterator<Statement> predicateStores;
 
+    /**
+     * @param subj null for any subject
+     * @param pred null for any predicate
+     * @param obj null for any object
+     * @param contexts none for any context, null in it for the default graph
+     */
     public RoFilteredTripleIterator(RoStore store, Resource subj, IRI pred,
             Value obj, Resource[] contexts) {
-        Stream<Statement> stream;
+        Stream<RoPredicateStore> stores;
         if (pred != null) {
             RoPredicateStore predicateStore = store.getPredicateStore(pred);
-            stream = predicateStore == null ? Stream.empty() : predicateStore.stream();
-        } else if (contexts == null || contexts.length == 0) {
-            stream = store.getPredicateStores()
-                    .values()
-                    .stream()
-                    .flatMap(RoPredicateStore::stream)
-                    .filter(s -> s.getContext() == null);
-        } else if (contexts.length == 1) {
-
-            stream = store.getPredicateStores()
-                    .values()
-                    .stream()
-                    .flatMap(RoPredicateStore::stream)
-                    .filter(s -> contexts[0].equals(s.getContext()));
+            stores = predicateStore == null ? Stream.empty() : Stream.of(predicateStore);
         } else {
-            Set<Resource> collect = Arrays.stream(contexts)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
-            stream = store.getPredicateStores()
-                    .values()
-                    .stream()
-                    .flatMap(RoPredicateStore::stream)
-                    .filter(s -> s.getContext() != null)
-                    .filter(s -> collect.contains(s.getContext()));
+            stores = store.getPredicateStores().values().stream();
         }
-        if (subj != null) {
-            stream = stream.filter(s -> s.getSubject().equals(subj));
-        } else if (obj != null) {
-            stream = stream.filter(s -> s.getObject().equals(obj));
+        // the subject and object are selected by Parquet in the triple lists
+        Stream<Statement> stream = stores.flatMap(p -> p.stream(subj, obj));
+        if (contexts != null && contexts.length > 0) {
+            List<Resource> inContexts = Arrays.asList(contexts);
+            stream = stream.filter(s -> inContexts.stream().anyMatch(c -> Objects.equals(c, s.getContext())));
         }
         predicateStores = stream.iterator();
     }

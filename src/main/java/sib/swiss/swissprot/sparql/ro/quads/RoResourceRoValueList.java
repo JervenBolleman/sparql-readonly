@@ -16,12 +16,15 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import dev.hardwood.Hardwood;
 import dev.hardwood.metadata.PhysicalType;
 import dev.hardwood.metadata.RepetitionType;
+import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.reader.RowReader;
 import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.Statement;
@@ -29,6 +32,7 @@ import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
@@ -176,6 +180,42 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return triples.rows()
                 .<Iterator<Statement>>map(this::newIterator)
                 .orElseGet(Collections::emptyIterator);
+    }
+
+    /**
+     * @return the kind of every subject in this list
+     */
+    public abstract Term.Kind subjectKind();
+
+    /**
+     * @return the kind of every object in this list
+     */
+    public abstract Term.Kind objectKind();
+
+    /**
+     * The triples with this subject and object, selected by Parquet.
+     *
+     * @param subject null for any subject, otherwise of the
+     * {@link #subjectKind()}
+     * @param object null for any object, otherwise of the
+     * {@link #objectKind()}
+     */
+    public Stream<Statement> stream(Term subject, Term object) {
+        FilterPredicate filter = null;
+        if (subject != null) {
+            filter = FilterPredicate.eq(SUBJECT, subject.id());
+        }
+        if (object != null) {
+            FilterPredicate onObject = FilterPredicate.eq(OBJECT, object.id());
+            filter = filter == null ? onObject : FilterPredicate.and(filter, onObject);
+        }
+        if (filter == null) {
+            return stream();
+        }
+        Iterator<Statement> iterator = triples.rows(filter)
+                .<Iterator<Statement>>map(this::newIterator)
+                .orElseGet(Collections::emptyIterator);
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
     }
 
     protected abstract RoResourceValueListIterator newIterator(RowReader rows);

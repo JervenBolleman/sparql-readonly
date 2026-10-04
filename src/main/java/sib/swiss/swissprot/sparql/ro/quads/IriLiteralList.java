@@ -8,6 +8,7 @@ import dev.hardwood.reader.RowReader;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -22,6 +23,16 @@ public class IriLiteralList extends RoResourceRoValueList<RoIri, RoLiteral> {
 
     public IriLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
         this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.IRI;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.LITERAL;
     }
 
     @Override

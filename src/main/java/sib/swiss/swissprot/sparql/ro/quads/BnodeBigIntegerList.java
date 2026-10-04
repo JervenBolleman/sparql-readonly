@@ -9,6 +9,7 @@ import dev.hardwood.reader.RowReader;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
@@ -42,6 +43,16 @@ public class BnodeBigIntegerList extends RoResourceRoValueList<RoBnode, RoBigInt
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @Override
+    public Term.Kind subjectKind() {
+        return Term.Kind.BNODE;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.INTEGER;
     }
 
     @Override
