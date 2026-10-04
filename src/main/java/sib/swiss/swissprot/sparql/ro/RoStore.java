@@ -1,15 +1,18 @@
 package sib.swiss.swissprot.sparql.ro;
 
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Logger;
 
 import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
@@ -20,7 +23,6 @@ import org.eclipse.rdf4j.rio.RDFHandlerException;
 import org.eclipse.rdf4j.rio.RDFParseException;
 import org.eclipse.rdf4j.rio.RDFParser;
 import org.eclipse.rdf4j.rio.Rio;
-import org.eclipse.rdf4j.rio.UnsupportedRDFormatException;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.helpers.AbstractSail;
@@ -28,12 +30,21 @@ import org.eclipse.rdf4j.sail.helpers.AbstractSail;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
+import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
+import sib.swiss.swissprot.sparql.ro.values.RoBnode;
+import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
+import sib.swiss.swissprot.sparql.ro.values.RoIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
+import sib.swiss.swissprot.sparql.ro.values.RoResource;
+import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
+import sib.swiss.swissprot.sparql.ro.values.RoValue;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIntegerDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempLiteralDictionary;
 
 public class RoStore extends AbstractSail {
+
+	private static final Logger LOGGER = Logger.getLogger(RoStore.class.getName());
 
 	private RoValueFactory vf;
 	private final FederatedServiceResolver federatedServiceResolver;
@@ -163,78 +174,125 @@ public class RoStore extends AbstractSail {
 		return namespaces;
 	}
 
+	/**
+	 * Loads the files in one parse. Values get provisional ids, the triples
+	 * are staged with them, and once the dictionaries are sorted and written
+	 * the staged triples are stored with their final ids.
+	 *
+	 * @see docs/loading.md
+	 */
 	public void load(File... files)
 			throws RDFParseException, RDFHandlerException, IOException {
-
-		final TempLiteralDictionary tempLitalDictionary = new TempLiteralDictionary(
+		final TempLiteralDictionary literals = new TempLiteralDictionary(
 				subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), hardwood);
-		final TempIriDictionary tempIriDictionary = new TempIriDictionary(
+		final TempIriDictionary iris = new TempIriDictionary(
 				subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood);
-		final TempIntegerDictionary tempIntegerDictionary = new TempIntegerDictionary(
+		final TempIntegerDictionary integers = new TempIntegerDictionary(
 				subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES),
 				hardwood);
-		parseFilesForTempDictionaries(tempLitalDictionary, tempIriDictionary,
-				tempIntegerDictionary, files);
-		// flushes what was collected to the temp files read by load()
-		tempLitalDictionary.close();
-		tempIriDictionary.close();
-		tempIntegerDictionary.close();
+		final File stagingFile = new File(getDataDir(), "staged-triples");
+		try {
+			try (StagedTriples staged = new StagedTriples(stagingFile)) {
+				parse(files, iris, literals, integers, staged);
+			}
 
-		closeDictionaries();
-		iriDict = tempIriDictionary.load();
-		literalDict = tempLitalDictionary.load();
-		integerDict = tempIntegerDictionary.load();
+			closeDictionaries();
+			iriDict = iris.load();
+			literalDict = literals.load();
+			integerDict = integers.load();
 
-		ConcurrentHashMap<RoIri, RoPredicateStore.Builder> builders = new ConcurrentHashMap<>();
-		parseFiles(files, builders);
-
-		for (RoPredicateStore.Builder builder : builders.values()) {
-			this.addPredicateStore(builder.build());
+			for (RoPredicateStore.Builder builder : storeStaged(stagingFile, iris, literals, integers)) {
+				addPredicateStore(builder.build());
+			}
+		} finally {
+			if (stagingFile.exists() && !stagingFile.delete()) {
+				LOGGER.warning("Could not delete " + stagingFile);
+			}
 		}
-
 		reinitPredicateStores();
 	}
 
-	private void parseFilesForTempDictionaries(
-			final TempLiteralDictionary tempLitalDictionary,
-			final TempIriDictionary tempIriDictionary,
-			final TempIntegerDictionary tempIntegerDictionary, File... files)
-			throws IOException, FileNotFoundException {
+	private void parse(File[] files, TempIriDictionary iris, TempLiteralDictionary literals,
+			TempIntegerDictionary integers, StagedTriples staged) throws IOException {
+		AtomicLong bnodeCounter = new AtomicLong();
 		for (File file : files) {
-			final Optional<RDFFormat> op = Rio
-					.getParserFormatForFileName(file.getName());
-			if (op.isPresent()) {
-				final RDFFormat format = op.get();
-				final RDFParser parser = Rio.createParser(format, vf);
-
-				parser.setRDFHandler(
-						new DictionaryBuildingHandler(this, tempIriDictionary,
-								tempLitalDictionary, tempIntegerDictionary));
-				parser.parse(new FileReader(file), "");
+			final Optional<RDFFormat> format = Rio.getParserFormatForFileName(file.getName());
+			if (format.isEmpty()) {
+				LOGGER.warning("Skipping " + file + ", not a known RDF format");
+				continue;
+			}
+			final RDFParser parser = Rio.createParser(format.get(), vf);
+			parser.setRDFHandler(new LoadingHandler(getNamespaces(), iris, literals, integers,
+					staged, bnodeCounter));
+			try (InputStream in = new BufferedInputStream(new FileInputStream(file), 1 << 20)) {
+				parser.parse(in, "");
 			}
 		}
 	}
 
-	public void parseFiles(File[] files,
-			ConcurrentHashMap<RoIri, RoPredicateStore.Builder> builders)
-			throws RDFHandlerException, IOException, RDFParseException,
-			UnsupportedRDFormatException {
-		AtomicLong bnodeCounter = new AtomicLong();
-		for (File file : files) {
-			final Optional<RDFFormat> op = Rio
-					.getParserFormatForFileName(file.getName());
-			if (op.isPresent()) {
-				final RDFFormat format = op.get();
-				final RDFParser parser = Rio.createParser(format, vf);
-
-				PredicateListBuildingHandler handler = new PredicateListBuildingHandler(
-						this,
-						new RoDictionaries(iriDict, literalDict, integerDict),
-						subDataDirs.get(RoDirectories.PREDICATE_LISTS),
-						bnodeCounter, builders);
-				parser.setRDFHandler(handler);
-				parser.parse(new FileReader(file), "");
+	/**
+	 * Reads the staged triples, in the order they were parsed, and adds them
+	 * with their final ids to the builder for their predicate.
+	 */
+	private Collection<RoPredicateStore.Builder> storeStaged(File stagingFile,
+			TempIriDictionary iris, TempLiteralDictionary literals,
+			TempIntegerDictionary integers) throws IOException {
+		final RoDictionaries dictionaries = new RoDictionaries(iriDict, literalDict, integerDict);
+		final File predicateLists = subDataDirs.get(RoDirectories.PREDICATE_LISTS);
+		final Map<Long, RoPredicateStore.Builder> builders = new HashMap<>();
+		// A context is a key of the graph bitmaps: keeping its instance keeps
+		// its hash, which costs a dictionary read to compute.
+		final Map<Long, RoResource> iriContexts = new HashMap<>();
+		final Remap remap = new Remap(iris, literals, integers);
+		StagedTriples.read(hardwood, stagingFile, (subjectKind, subject, predicate, objectKind, object,
+				contextKind, context) -> {
+			RoPredicateStore.Builder builder = builders.get(predicate);
+			if (builder == null) {
+				RoIri roPredicate = new RoIri(iris.finalId(predicate), iriDict);
+				builder = new RoPredicateStore.Builder(
+						RoPredicateStore.initDirectory(predicateLists, roPredicate),
+						roPredicate, dictionaries, hardwood);
+				builders.put(predicate, builder);
 			}
+			RoResource graph = null;
+			if (contextKind == StagedTriples.Kind.IRI) {
+				graph = iriContexts.computeIfAbsent(context, c -> (RoResource) remap.value(contextKind, c));
+			} else if (contextKind != StagedTriples.Kind.NONE) {
+				graph = (RoResource) remap.value(contextKind, context);
+			}
+			builder.add((RoResource) remap.value(subjectKind, subject),
+					remap.value(objectKind, object), graph);
+		});
+		return builders.values();
+	}
+
+	/**
+	 * Turns a staged kind and id into the value with its final id.
+	 */
+	private final class Remap {
+
+		private final TempIriDictionary iris;
+		private final TempLiteralDictionary literals;
+		private final TempIntegerDictionary integers;
+
+		private Remap(TempIriDictionary iris, TempLiteralDictionary literals,
+				TempIntegerDictionary integers) {
+			this.iris = iris;
+			this.literals = literals;
+			this.integers = integers;
+		}
+
+		RoValue value(StagedTriples.Kind kind, long id) {
+			return switch (kind) {
+				case IRI -> new RoIri(iris.finalId(id), iriDict);
+				case BNODE -> new RoBnode(id);
+				case LITERAL -> new RoSimpleLiteral(literals.finalId(id), literalDict);
+				case INT -> new RoIntegerLiteral(id);
+				case BOOLEAN -> new RoBooleanLiteral(id != 0);
+				case INTEGER -> new RoBigIntegerLiteral(id);
+				case BIG_INTEGER -> new RoBigIntegerLiteral(integers.finalId(id), integers.value(id));
+				case NONE -> throw new IllegalArgumentException("No value");
+			};
 		}
 	}
 

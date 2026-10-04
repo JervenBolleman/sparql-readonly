@@ -5,57 +5,6 @@
       "serializable": true
     },
     {
-      "type": "com.github.benmanes.caffeine.cache.CacheLoader"
-    },
-    {
-      "type": "com.github.benmanes.caffeine.cache.PS",
-      "fields": [
-        {
-          "name": "key"
-        },
-        {
-          "name": "value"
-        }
-      ]
-    },
-    {
-      "type": "com.github.benmanes.caffeine.cache.PSMS",
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ]
-    },
-    {
-      "type": "com.github.benmanes.caffeine.cache.SSLMS",
-      "fields": [
-        {
-          "name": "FACTORY"
-        },
-        {
-          "name": "maximum"
-        },
-        {
-          "name": "weightedSize"
-        }
-      ]
-    },
-    {
-      "type": "com.github.benmanes.caffeine.cache.SSMS",
-      "fields": [
-        {
-          "name": "FACTORY"
-        },
-        {
-          "name": "maximum"
-        },
-        {
-          "name": "weightedSize"
-        }
-      ]
-    },
-    {
       "type": "com.github.luben.zstd.AutoCloseBase"
     },
     {
@@ -181,16 +130,6 @@
     },
     {
       "type": "sun.text.resources.cldr.FormatData_en"
-    },
-    {
-      "type": {
-        "lambda": {
-          "declaringClass": "sib.swiss.swissprot.sparql.ro.PredicateListBuildingHandler",
-          "interfaces": [
-            "com.github.benmanes.caffeine.cache.CacheLoader"
-          ]
-        }
-      }
     }
   ],
   "resources": [

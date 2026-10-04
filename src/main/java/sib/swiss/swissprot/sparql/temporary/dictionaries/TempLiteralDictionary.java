@@ -1,26 +1,18 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.text.Collator;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Locale;
+import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
-import java.util.stream.Stream;
+import java.util.Optional;
 
 import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.vocabulary.RDF;
-import org.eclipse.rdf4j.model.vocabulary.XSD;
 
-import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
@@ -32,59 +24,53 @@ public class TempLiteralDictionary extends TempDictionary {
 
     private static final int BATCH_SIZE = 64 * 1024;
 
-    private final Map<IRI, FileOutputStream> datatypes = new HashMap<>();
-    private final Map<String, FileOutputStream> languages = new HashMap<>();
+    /**
+     * Literals with a language are grouped per language, the others per
+     * datatype.
+     */
+    private final Map<String, ProvisionalGroup<String>> byLanguage = new HashMap<>();
+    private final Map<IRI, ProvisionalGroup<String>> byDatatype = new HashMap<>();
+    private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
+    private final List<Literal> exampleOfGroup = new ArrayList<>();
 
     public TempLiteralDictionary(File out, Hardwood hardwood) {
         super(out, hardwood);
     }
 
-    public void add(Literal subject) throws IOException {
-        final IRI namespace = subject.getDatatype();
-        if (namespace.equals(XSD.BOOLEAN) || namespace.equals(XSD.INT)) {
-            return;
-        }
+    /**
+     * @return the provisional id of the literal, see {@link #finalId(long)}
+     */
+    public long add(Literal literal) {
+        final Optional<String> language = literal.getLanguage();
+        ProvisionalGroup<String> group = language.isPresent()
+                ? byLanguage.computeIfAbsent(language.get(), l -> newGroup(literal))
+                : byDatatype.computeIfAbsent(literal.getDatatype(), d -> newGroup(literal));
+        return group.add(literal.getLabel());
+    }
 
-        // one label per line
-        final byte[] label = stringAsUtf8ByteArray(escapeLine(subject.getLabel()));
-        if (subject.getLanguage().isPresent()) {
-            final String language = subject.getLanguage().get();
-            FileOutputStream fos = languages.get(language);
-            if (fos == null) {
-                fos = new FileOutputStream(languageFile(language));
-                languages.put(language, fos);
-            }
-            fos.write(label);
-            fos.write('\n');
-        } else {
-            FileOutputStream fos = datatypes.get(namespace);
-            if (fos == null) {
-                fos = new FileOutputStream(datatypeFile(namespace));
-                datatypes.put(namespace, fos);
-            }
-            fos.write(label);
-            fos.write('\n');
-        }
+    private ProvisionalGroup<String> newGroup(Literal literal) {
+        ProvisionalGroup<String> group = new ProvisionalGroup<>(groups.size());
+        groups.add(group);
+        exampleOfGroup.add(literal);
+        return group;
+    }
+
+    /**
+     * @return the id in the dictionary {@link #load()} wrote, of the literal
+     * that got this provisional id
+     */
+    public long finalId(long provisionalId) {
+        return groups.get(ProvisionalGroup.group(provisionalId)).finalId(provisionalId);
     }
 
     @Override
-    public void close() throws IOException {
-        for (FileOutputStream fos : datatypes.values()) {
-            fos.close();
-        }
-        for (FileOutputStream fos : languages.values()) {
-            fos.close();
-        }
+    public void close() {
     }
 
-    private File languageFile(String language) {
-        return new File(out, "lang-" + language);
-    }
-
-    private File datatypeFile(IRI datatype) {
-        return new File(out, FileNameEncoderFunctions.encodeIRI(datatype));
-    }
-
+    /**
+     * Writes all literals into one dictionary, sorted per group. The id of a
+     * literal is its row.
+     */
     public RoLiteralDict load() throws IOException {
         File file = new File(out, RoLiteralDict.PATH_NAME);
         if (file.exists()) {
@@ -92,43 +78,17 @@ public class TempLiteralDictionary extends TempDictionary {
         }
         try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
             LiteralBatch batch = new LiteralBatch(writer);
-            writeLanguageStrings(batch);
-            writeDatatypesStrings(batch);
+            for (ProvisionalGroup<String> group : groups) {
+                Literal example = exampleOfGroup.get(group.index());
+                List<String> sorted = group.sorted();
+                final long first = batch.addAll(sorted, example.getDatatype(),
+                        example.getLanguage().orElse(null));
+                group.assignFinalIds(sorted, position -> first + position);
+                group.releaseValues();
+            }
             batch.flush();
         }
         return new RoLiteralDict(ParquetTable.open(hardwood, file));
-    }
-
-    private void writeLanguageStrings(LiteralBatch batch) throws IOException {
-        for (String language : languages.keySet()) {
-            File tempFile = languageFile(language);
-            try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
-                Stream<String> labels = br.lines()
-                        .map(TempDictionary::unescapeLine)
-                        .sorted(Collator.getInstance(Locale.forLanguageTag(language)))
-                        .distinct();
-                batch.addAll(labels.iterator(), RDF.LANGSTRING, language);
-            }
-            if (!tempFile.delete()) {
-                Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete lang temp file " + language);
-            }
-        }
-    }
-
-    private void writeDatatypesStrings(LiteralBatch batch) throws IOException {
-        for (IRI datatype : datatypes.keySet()) {
-            File tempFile = datatypeFile(datatype);
-            try (BufferedReader br = Files.newBufferedReader(tempFile.toPath())) {
-                Stream<String> labels = br.lines()
-                        .map(TempDictionary::unescapeLine)
-                        .sorted()
-                        .distinct();
-                batch.addAll(labels.iterator(), datatype, null);
-            }
-            if (!tempFile.delete()) {
-                Logger.getLogger(TempLiteralDictionary.class.getName()).warning("Can't delete datatype temp file " + datatype);
-            }
-        }
     }
 
     /**
@@ -149,20 +109,25 @@ public class TempLiteralDictionary extends TempDictionary {
             this.writer = writer;
         }
 
-        private void addAll(Iterator<String> labels, IRI datatype, String language) throws IOException {
+        /**
+         * @return the id of the first of the labels
+         */
+        private long addAll(List<String> labels, IRI datatype, String language) throws IOException {
+            final long first = index;
             final byte[] datatypeBytes = stringAsUtf8ByteArray(datatype.stringValue());
             final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
-            while (labels.hasNext()) {
+            for (String label : labels) {
                 if (size == BATCH_SIZE) {
                     flush();
                 }
                 ids[size] = index++;
-                this.labels[size] = stringAsUtf8ByteArray(labels.next());
+                this.labels[size] = stringAsUtf8ByteArray(label);
                 datatypes[size] = datatypeBytes;
                 languages[size] = languageBytes;
                 noLanguage[size] = language == null;
                 size++;
             }
+            return first;
         }
 
         private void flush() throws IOException {

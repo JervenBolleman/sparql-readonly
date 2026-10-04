@@ -4,7 +4,7 @@ TODO item 4: investigate options for single pass parsing, or parsing into an
 intermediate Parquet file. Measured on 2026-10-04 at commit `ad2e55f`, on an
 8 core machine with 31 GB of RAM, using JDK 27-ea.
 
-## How loading works now
+## How loading worked before option B
 
 1. **Pass 1** parses every file and writes each value to a temp dictionary:
    IRIs into one text file per namespace, literals into one text file per
@@ -105,7 +105,37 @@ C. Collisions have to be detected when the dictionary is sorted (equal hash,
 different string) and handled by a slower fallback. It is cheaper than C, but
 still needs C's sort machinery.
 
-## Recommendation
+## Implemented: option B
+
+`RoStore.load` now parses once. `LoadingHandler` gives every value a
+provisional id, `(group << 32) | order first seen`, where the group is an IRI
+namespace, a literal language or datatype, or the big integers. Blank nodes,
+`xsd:int`, booleans and `xsd:integer` values that are their own id are stored
+as they are. It writes each triple to a staging Parquet file
+(`StagedTriples`) as a kind and an id per position. The temp dictionaries
+hold the distinct values in memory (`ProvisionalGroup`). Their `load()`
+sorts each group, writes the dictionary, and keeps an array from provisional
+to final id. The staged triples are then read once, in order, and stored
+through those arrays. Pass 2 and every lookup during loading are gone.
+
+Measured on `taxonomy.rdf` (16.5M triples, 1.4 GB RDF/XML):
+
+| | Two passes (before) | One pass (now) |
+| --- | --- | --- |
+| Statements per second, storing | 1 370 | 159 000 (parse and stage) |
+| Whole load | about 4.5 min, plus about 3.2 h estimated for pass 2 | 2 min 39 s, everything included |
+| Store on disk | | 558 MB |
+
+The rate of the single pass drops while hardwood compresses a staging row
+group, which the parse thread waits for. Writing the staging file from a
+second thread would hide that.
+
+Memory is now the limit: every distinct value of a dictionary group is held
+in a hash map until its dictionary is written. That is fine for the taxonomy;
+for data with billions of distinct values option C replaces the maps, with
+the staging file and the remap kept as they are.
+
+## Recommendation (before the implementation)
 
 1. Do **B** now. It removes the lookups, needs one parse, and is a contained
    change. Write the staging file so that its layout also suits C:
@@ -119,9 +149,7 @@ still needs C's sort machinery.
    an id is `id / 4096`; or, for IRIs and strings, a memory-mapped offsets file
    beside the Parquet file for O(1) access.
 
-## Related open issues
+## Full taxonomy
 
-- `RoStoreTest#taxonomyTripleLoad` still fails in pass 2 with a value that
-  pass 1 put into the dictionary but that the lookup cannot find (not yet
-  investigated). Its expected count of 40 000 000 is also wrong: the two
-  files hold 55 872 533 triples.
+`RoStoreTest#taxonomyTripleLoad` loads both taxonomy files, 55 872 533
+triples, and counts them back through the store in 280 s.

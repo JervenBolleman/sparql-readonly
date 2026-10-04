@@ -1,26 +1,17 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.text.Collator;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import dev.hardwood.Hardwood;
 import dev.hardwood.metadata.LogicalType;
@@ -30,7 +21,6 @@ import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.roaringbitmap.RoaringBitmap;
 
-import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
@@ -121,173 +111,89 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
-    private final Map<String, File> namespacesFile = new HashMap<>();
-    private final Map<File, FileOutputStream> fileFosToClose = new ConcurrentHashMap<>();
-    // Removed streams are handed over synchronously, so that they can be
-    // closed before any of their files are read.
-    private final Cache<File, FileOutputStream> fileFosCache = Caffeine.newBuilder()
-            .maximumSize(1_000)
-            .initialCapacity(1_000)
-            .executor(Runnable::run)
-            .<File, FileOutputStream>removalListener((key, value, cause) -> fileFosToClose.put(key, value))
-            .build();
-    private final Cache<IRI, Boolean> iriCache = Caffeine.newBuilder()
-            .maximumSize(10_000)
-            .build();
+    private final Map<String, ProvisionalGroup<String>> byNamespace = new HashMap<>();
+    private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
+    private final List<String> namespaceOfGroup = new ArrayList<>();
 
     public TempIriDictionary(File out, Hardwood hardwood) {
         super(out, hardwood);
     }
 
-    public void add(IRI subject) throws IOException {
-        if (iriCache.getIfPresent(subject) != null) {
-            return;
+    /**
+     * @return the provisional id of the IRI, see {@link #finalId(long)}
+     */
+    public long add(IRI iri) {
+        String namespace = RoIriDictionary.storedNamespace(iri);
+        ProvisionalGroup<String> group = byNamespace.get(namespace);
+        if (group == null) {
+            group = new ProvisionalGroup<>(groups.size());
+            byNamespace.put(namespace, group);
+            groups.add(group);
+            namespaceOfGroup.add(namespace);
         }
-        iriCache.put(subject, Boolean.TRUE);
-        String namespace = RoIriDictionary.storedNamespace(subject);
-        File file = getFileForNamespace(namespace);
-
-        FileOutputStream fos = getFileOutPUtStreamForFile(file);
-        String localname = RoIriDictionary.storedLocalName(subject);
-        fos.write(localname.getBytes(StandardCharsets.UTF_8));
-        fos.write('\n');
-        closeEvictedFileOutputStream();
-
+        return group.add(RoIriDictionary.storedLocalName(iri));
     }
 
-    private void closeEvictedFileOutputStream() throws IOException {
-        for (Iterator<FileOutputStream> it = fileFosToClose.values().iterator(); it.hasNext();) {
-            FileOutputStream toClose = it.next();
-            toClose.close();
-            it.remove();
-        }
-    }
-
-    private FileOutputStream getFileOutPUtStreamForFile(File file) {
-        FileOutputStream fos = fileFosCache.get(file, (f) -> {
-            try {
-                return new FileOutputStream(f, true);
-            } catch (FileNotFoundException ex) {
-                Logger.getLogger(TempIriDictionary.class.getName()).log(Level.SEVERE, null, ex);
-                throw new RuntimeException(ex);
-            }
-        });
-        return fos;
-    }
-
-    public File getFileForNamespace(String namespace) throws IOException {
-        File file = namespacesFile.get(namespace);
-        if (file == null) {
-            File dir = new File(out, "temp-"
-                    + FileNameEncoderFunctions.encodeNamespace(namespace));
-            dir.mkdir();
-
-            File namespaceFile = new File(dir, "namespace");
-            Files.write(namespaceFile.toPath(), Arrays.asList(namespace));
-            file = new File(dir, "data");
-            namespacesFile.put(namespace, file);
-
-        }
-        return file;
+    /**
+     * @return the id in the dictionary {@link #load()} wrote, of the IRI that
+     * got this provisional id
+     */
+    public long finalId(long provisionalId) {
+        return groups.get(ProvisionalGroup.group(provisionalId)).finalId(provisionalId);
     }
 
     @Override
-    public void close() throws IOException {
-        fileFosCache.invalidateAll();
-        closeEvictedFileOutputStream();
+    public void close() {
     }
 
+    /**
+     * Writes a dictionary per namespace, the largest first, and assigns the
+     * final ids.
+     */
     public RoIriDictionary load() throws IOException {
-        final List<NamespaceFilePair> bigestNamespaceFirst = namespacesFile
-                .entrySet()
-                .stream()
-                .map(s -> new NamespaceFilePair(s.getKey(), s.getValue())).sorted((f1, f2) -> Long
-                .compare(f2.file.length(), f1.file.length()))
-                .collect(Collectors.toList());
+        List<ProvisionalGroup<String>> biggestFirst = new ArrayList<>(groups);
+        biggestFirst.sort(Comparator.comparingInt((ProvisionalGroup<String> g) -> g.size()).reversed());
 
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
-
-        for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
-            String namespace = namespaceTempFile.namespace;
-            RoNamespace roNamespace = namespaces.add(null,
-                    namespace);
-            File tempFile = namespaceTempFile.file;
-
-            final File iriFile = new File(out, roNamespace.getId() + "-iris");
-            File lengthString = new File(out, roNamespace.getId() + "-prefixed-iris");
-
-            File offsetsFile = new File(out, roNamespace.getId() + "-offsets");
+        for (ProvisionalGroup<String> group : biggestFirst) {
+            RoNamespace roNamespace = namespaces.add(null, namespaceOfGroup.get(group.index()));
+            final long namespaceBits = roNamespace.getId() << RoNamespaces.BITS_FOR_NAMESPACES;
+            List<String> sorted = group.sorted();
             DataDistribution data = new DataDistribution();
-            {
-                final List<String> tempNodes = readTempFileIntoMemory(tempFile,
-                        data);
-                writeNamespacesToDisk(tempNodes, offsetsFile, lengthString, iriFile,
-                        data);
+            sorted.forEach(data::measure);
+
+            File iriFile = new File(out, roNamespace.getId() + "-iris");
+            File bitmapFile = new File(out, roNamespace.getId() + "-prefixed-iris");
+            File infoFile = new File(out, roNamespace.getId() + "-offsets");
+            if (data.allNumericWithPrefix()) {
+                writeNamespaceWithPrefixedNumbersToDisk(sorted, bitmapFile, infoFile, data);
+                // the id is the number after the prefix
+                final int prefixLength = data.longestCommonPrefix == null ? 0 : data.longestCommonPrefix.length();
+                group.assignFinalIds(localName -> namespaceBits
+                        | Integer.parseInt(localName.substring(prefixLength)));
+                iriDictionary.addPredixFollowedByBNumberDictionary(infoFile, bitmapFile, roNamespace);
+            } else {
+                writeNamespaceWithLongIdsToDisk(sorted, iriFile);
+                // the id is the row in the sorted dictionary
+                group.assignFinalIds(sorted, position -> namespaceBits | position);
+                iriDictionary.addBasicRoIriNamespaceDictionary(ParquetTable.open(hardwood, iriFile), roNamespace);
             }
-            writeToDisk(data, iriDictionary, offsetsFile, lengthString, roNamespace, iriFile);
-            removeTempFiles(tempFile);
+            group.releaseValues();
         }
         return iriDictionary;
     }
 
-    private void removeTempFiles(File tempFile) {
-        File parentFile = tempFile.getParentFile();
-        if (!new File(parentFile,"namespace").delete())
-        {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
-        }
-        if (!tempFile.delete()) {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
-        }
-        if (!parentFile.delete()) {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
-        }
-    }
-
-    private void writeToDisk(DataDistribution data, RoIriDictionary iriDictionary, File offsetsFile, File lengthString, RoNamespace roNamespace, final File iriFile) throws IOException {
-        if (data.allNumericWithPrefix()) {
-            
-            iriDictionary.addPredixFollowedByBNumberDictionary(offsetsFile, lengthString, roNamespace);
-        } else {
-            iriDictionary.addBasicRoIriNamespaceDictionary(ParquetTable.open(hardwood, iriFile), roNamespace);
-        }
-    }
-
-    private List<String> readTempFileIntoMemory(File tempFile,
-            DataDistribution data) throws IOException {
-        try (final Stream<String> lines = Files.lines(tempFile.toPath(), StandardCharsets.UTF_8)) {
-
-            return lines
-                    .sorted(Collator.getInstance(Locale.US))
-                    .distinct()
-                    .peek(data::measure)
-                    .collect(Collectors.toList());
-        }
-    }
-
-    private void writeNamespacesToDisk(final List<String> tempNodes, File offsetsFile, File lengthString, File iriFile, DataDistribution data2)
-            throws IOException, FileNotFoundException {
-        if (data2.allNumericWithPrefix()) {
-            offsetsFile.createNewFile();
-            lengthString.createNewFile();
-            writeNamespaceWithPrefixedNumbersToDisk(tempNodes, lengthString,
-                    offsetsFile, data2);
-        } else {
-            writeNamespaceWithLongIdsToDisk(tempNodes, iriFile);
-        }
-    }
-
-    private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, File iriFile)
+    private void writeNamespaceWithLongIdsToDisk(final List<String> sorted, File iriFile)
             throws IOException {
         try (ParquetTable.Writer writer = new ParquetTable.Writer(iriFile, SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
-            for (int start = 0; start < tempNodes.size(); start += BATCH_SIZE) {
-                final int size = Math.min(BATCH_SIZE, tempNodes.size() - start);
+            for (int start = 0; start < sorted.size(); start += BATCH_SIZE) {
+                final int size = Math.min(BATCH_SIZE, sorted.size() - start);
                 final long[] ids = new long[size];
                 final byte[][] values = new byte[size][];
                 for (int i = 0; i < size; i++) {
                     ids[i] = start + i;
-                    values[i] = tempNodes.get(start + i).getBytes(StandardCharsets.UTF_8);
+                    values[i] = sorted.get(start + i).getBytes(StandardCharsets.UTF_8);
                 }
                 writer.writeBatch(b -> b.longs(RoDictionary.ID, ids)
                         .bytes(RoIriDictionary.IRI_VALUE, values));
@@ -296,8 +202,8 @@ public class TempIriDictionary extends TempDictionary {
     }
 
     private void writeNamespaceWithPrefixedNumbersToDisk(
-            final List<String> tempNodes, File lengthString, File offsetsFile,
-            DataDistribution data2) throws IOException, FileNotFoundException {
+            final List<String> sorted, File bitmapFile, File infoFile,
+            DataDistribution data2) throws IOException {
         RoaringBitmap map = new RoaringBitmap();
         int start = 0;
         String longestCommonPrefix = data2.longestCommonPrefix;
@@ -306,31 +212,18 @@ public class TempIriDictionary extends TempDictionary {
         } else {
             longestCommonPrefix = "";
         }
-        for (int i = 0; i < tempNodes.size(); i++) {
-            map.add(Integer.parseInt(tempNodes.get(i).substring(start)));
+        for (int i = 0; i < sorted.size(); i++) {
+            map.add(Integer.parseInt(sorted.get(i).substring(start)));
         }
         try (DataOutputStream dos = new DataOutputStream(
-                new FileOutputStream(lengthString))) {
+                new FileOutputStream(bitmapFile))) {
             map.serialize(dos);
         }
         List<String> info = Arrays.asList(new String[]{
             String.valueOf(longestCommonPrefix.length()),
             longestCommonPrefix, String.valueOf(data2.minLength),
             String.valueOf(data2.maxLength)});
-        Files.write(offsetsFile.toPath(), info, StandardCharsets.UTF_8);
+        Files.write(infoFile.toPath(), info, StandardCharsets.UTF_8);
 
     }
-
-    private final class NamespaceFilePair {
-
-        private final String namespace;
-
-        private final File file;
-
-        public NamespaceFilePair(String s, File file) {
-            this.namespace = s;
-            this.file = file;
-        }
-    }
-
 }
