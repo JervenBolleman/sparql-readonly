@@ -14,4 +14,13 @@ to detect if a the localname part is a digit. In which case they
 will be stored in a bitset. As we are readonly the dictionary will
 be stored sorted.
 
-During loading we need two passes over the data first to create the value dictionaries, then to build the triple tables. There will be a triple table for each predicate + value type combination. 
+During loading we need two passes over the data first to create the value dictionaries, then to build the triple tables. There will be a triple table for each predicate + value type combination.
+
+## Documentation
+
+- [docs/loading.md](docs/loading.md): how loading works, what it costs and
+  what limits it.
+- [docs/storage.md](docs/storage.md): what a store holds on disk, how reads
+  use it, and where data is duplicated.
+- [docs/loading-investigation.md](docs/loading-investigation.md): the design
+  history of the loader.

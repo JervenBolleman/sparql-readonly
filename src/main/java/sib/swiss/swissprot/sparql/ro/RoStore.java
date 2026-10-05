@@ -208,24 +208,37 @@ public class RoStore extends AbstractSail {
 					subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood, spill);
 			final TempIntegerDictionary integers = new TempIntegerDictionary(
 					subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), hardwood, spill);
+			long phase = System.nanoTime();
 			try (StagedTriples staged = new StagedTriples(stagingFile)) {
 				parse(files, iris, literals, integers, staged);
 			}
+			phase = logPhase("Parsed and staged the statements", phase);
 
 			closeDictionaries();
 			iriDict = iris.load();
 			literalDict = literals.load();
 			integerDict = integers.load();
+			phase = logPhase("Wrote the dictionaries", phase);
 
-			for (RoPredicateStore.Builder builder : storeStaged(stagingFile, iris, literals, integers)) {
+			Collection<RoPredicateStore.Builder> builders = storeStaged(stagingFile, iris, literals, integers);
+			phase = logPhase("Remapped the staged triples to the triple lists", phase);
+			for (RoPredicateStore.Builder builder : builders) {
 				addPredicateStore(builder.build());
 			}
+			logPhase("Sorted and wrote the triple lists", phase);
 		} finally {
 			if (stagingFile.exists() && !stagingFile.delete()) {
 				LOGGER.warning("Could not delete " + stagingFile);
 			}
 		}
 		reinitPredicateStores();
+	}
+
+	private static long logPhase(String phase, long since) {
+		long now = System.nanoTime();
+		LOGGER.log(java.util.logging.Level.INFO, "{0} in {1} s",
+				new Object[]{phase, Math.round((now - since) / 1e8) / 10.0});
+		return now;
 	}
 
 	private void parse(File[] files, TempIriDictionary iris, TempLiteralDictionary literals,

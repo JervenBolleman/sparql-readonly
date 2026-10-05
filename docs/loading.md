@@ -1,225 +1,186 @@
-# Loading: single pass or an intermediate Parquet file
+# Loading
 
-TODO item 4: investigate options for single pass parsing, or parsing into an
-intermediate Parquet file. Measured on 2026-10-04 at commit `ad2e55f`, on an
-8 core machine with 31 GB of RAM, using JDK 27-ea.
+How RDF files become a sparql-readonly store, what each step costs, and what
+limits it. This describes what is implemented. The on-disk result is
+described in [storage.md](storage.md); the design history and rejected
+options are in [loading-investigation.md](loading-investigation.md).
 
-## How loading worked before option B
+## Using it
 
-1. **Pass 1** parses every file and writes each value to a temp dictionary:
-   IRIs into one text file per namespace, literals into one text file per
-   datatype or language, and big integers into an in-memory set. Each file is
-   then sorted and written as a Parquet dictionary. A value's id is its row
-   number in that sorted file. If a namespace's local names are all a prefix
-   followed by a number, it becomes a bitmap instead, and the id is computed
-   from the string.
-2. **Pass 2** parses every file again and looks up the id of each subject and
-   object (predicates are cached). It then appends the ids to the triple list
-   for that predicate and value type.
+```
+java -Xmx4g -cp ... sib.swiss.swissprot.sparql.ro.Loader <store-directory> <rdf-file>...
+```
 
-## Measurements
+or from code:
 
-| What | Cost |
-| --- | --- |
-| Parsing the taxonomy RDF/XML (55.9M triples, 4.3 GB) | 153 s, about 365k triples/s |
-| Building a 2M entry IRI dictionary (sort and write) | 35 s |
-| Value to id lookup, 2M entry dictionary, old 1M row groups | 45 ms |
-| Id to string, same dictionary, old 1M row groups | 22 ms |
-| Value to id lookup, 4096 row groups (now) | 1.3 ms |
-| Id to string, 4096 row groups (now) | 0.7 ms |
-| Value to id lookup, 1024 row groups | 1.35 ms (no better) |
+```java
+RoStore store = new RoStore();
+store.setDataDir(directory);
+store.setLoadMemory(64L << 20);   // optional, see "Memory"
+store.init();
+store.load(files);
+```
 
-hardwood writes no page index, so statistics can only skip whole row groups.
-Since `ad2e55f` the dictionaries use 4096-row groups. What is left is a fixed
-cost of about 1 ms per lookup for building the column readers and handing the
-work to the decode thread pool. Smaller row groups do not reduce it.
+Any RDF format RDF4J's Rio recognises by file name is read. Files it does
+not recognise are skipped with a warning. A native executable of the loader
+can be built with `mvn -Pnative package` (GraalVM).
 
-## What this means
+## The flow
 
-**The second parse is not the problem; the lookups in pass 2 are.** Parsing
-again costs as much as the first pass, 153 s for the taxonomy. Pass 2 also
-does one dictionary lookup for every subject and object that is not in a
-bitmap namespace:
+The RDF is parsed once. Every value gets a *provisional id* while parsing,
+because its final id depends on where it ends up in a sorted dictionary,
+which is only known once all values are seen. Triples are kept with their
+provisional ids in a staging file until the dictionaries are written, then
+translated to their final ids and written, sorted, into the triple lists.
 
-- Taxonomy: about 6.6M literal objects at roughly 1 ms each is close to
-  2 hours. The taxon IRIs are numbered, so they resolve through the bitmaps
-  in microseconds.
-- UniProt size (more than 20 billion triples, per the README): at 1 ms per
-  lookup this is out of reach, whatever the number of passes.
+```mermaid
+flowchart TD
+    rdf[/"RDF files"/] --> parse["1. Parse and stage<br/>LoadingHandler"]
+    parse -->|"distinct values,<br/>provisional ids"| temp["temp dictionaries<br/>in memory"]
+    temp -->|"over the memory budget:<br/>sorted runs"| runs[("spill/ runs")]
+    runs -->|"8 at a time,<br/>background thread"| runs
+    parse -->|"triples as<br/>(kind, provisional id)"| staged[("staged-triples")]
+    temp --> dict["2. Write the dictionaries<br/>merge, sort, assign final ids"]
+    runs --> dict
+    dict --> dicts[("iriDictionaries/<br/>otherValueDictionaries/<br/>numberDictionaries/")]
+    dict -->|"provisional → final<br/>arrays"| remap["3. Remap<br/>RoStore.storeStaged"]
+    staged --> remap
+    remap -->|"(subject, object, context)<br/>per predicate and type"| sort["4. Sort and write<br/>SortedTripleWriter"]
+    sort --> lists[("predicateLists/<br/>sorted by subject<br/>and by object")]
+```
 
-An intermediate Parquet file on its own (option A below) would therefore save
-at most the 153 s of the second parse, and leave the hours of lookups in
-place. A useful change has to stop resolving terms one at a time against
-Parquet.
+### 1. Parse and stage
 
-## Options
+`LoadingHandler` receives each statement from the parser and identifies its
+subject, predicate, object and context:
 
-### A. Stage the parsed triples in Parquet, then resolve as now
-
-Pass 1 writes every triple as strings (plus term kinds) to a staging Parquet
-file while it fills the temp dictionaries. Pass 2 reads the staging file
-instead of parsing the RDF again.
-
-- Saves: the second parse, about half of the parsing cost.
-- Keeps: the per-term lookups, which are the real cost.
-- Extra: a staging file about as large as the data, compressed.
-
-Worth having only as a building block for B or C.
-
-### B. Provisional ids in one pass, then remap
-
-Pass 1 gives every new term a provisional id in the order it is first seen,
-from an in-memory map from term to provisional id per dictionary. It writes
-the triples as provisional ids straight into staging Parquet, and the term
-strings to the temp dictionaries as now. When a dictionary is sorted, its
-order gives an array from provisional id to final id. A final sequential
-pass rewrites the staged triples through those arrays (an array index, not a
-lookup) into the per-predicate lists. Bitmap namespaces keep computing their
-id from the string, so they need no map.
-
-- One parse. Every step after it is sequential reads and writes.
-- Memory: the term-to-id map holds every distinct non-bitmap term, roughly
-  80 to 100 bytes plus the string per term. Fine for the taxonomy, a few
-  million terms. Not for UniProt-size data with billions of distinct terms.
-- Moderate change: the temp dictionaries and the pass-2 handler change,
-  and the readers do not.
-
-### C. External sort and merge join (as Jena's xloader and HDT do)
-
-Pass 1 stages triples with their term strings in Parquet. The distinct terms
-of each dictionary come from an external sort (sorted Parquet runs, merged),
-which also assigns the ids. The staged triples are then sorted by subject
-string and merge joined with the sorted dictionary, then again by object
-string, giving id triples without a single random lookup.
-
-- Memory independent of data size; all I/O sequential.
-- Disk: a few times the size of the data during the sorts.
-- The most work: an external sort over Parquet runs is new code. hardwood
-  reads and writes the runs, the merge is ours.
-
-### D. Hash ids instead of provisional ids
-
-As B, but the provisional id is a 64-bit hash of the term, so no map is
-needed. The remap from hash to final id then needs a sort-merge join, as in
-C. Collisions have to be detected when the dictionary is sorted (equal hash,
-different string) and handled by a slower fallback. It is cheaper than C, but
-still needs C's sort machinery.
-
-## Implemented: option B
-
-`RoStore.load` now parses once. `LoadingHandler` gives every value a
-provisional id, `(group << 32) | order first seen`, where the group is an IRI
-namespace, a literal language or datatype, or the big integers. Blank nodes,
-`xsd:int`, booleans and `xsd:integer` values that are their own id are stored
-as they are. It writes each triple to a staging Parquet file
-(`StagedTriples`) as a kind and an id per position. The temp dictionaries
-hold the distinct values in memory (`ProvisionalGroup`). Their `load()`
-sorts each group, writes the dictionary, and keeps an array from provisional
-to final id. The staged triples are then read once, in order, and stored
-through those arrays. Pass 2 and every lookup during loading are gone.
-
-Measured on `taxonomy.rdf` (16.5M triples, 1.4 GB RDF/XML):
-
-| | Two passes (before) | One pass (now) |
+| Value | Kind | Id while staging |
 | --- | --- | --- |
-| Statements per second, storing | 1 370 | 159 000 (parse and stage) |
-| Whole load | about 4.5 min, plus about 3.2 h estimated for pass 2 | 2 min 39 s, everything included |
-| Store on disk | | 558 MB |
+| IRI | `IRI` | provisional, in the IRI namespace group |
+| blank node | `BNODE` | final: a counter for the whole load (labels are local to their file) |
+| `xsd:int` | `INT` | final: the value |
+| `xsd:boolean` | `BOOLEAN` | final: 1 or 0 |
+| `xsd:integer`, a long without the high bit | `INTEGER` | final: the value |
+| `xsd:integer`, anything else | `BIG_INTEGER` | provisional, in the integer dictionary |
+| any other literal | `LITERAL` | provisional, in the group of its language or datatype |
 
-The rate of the single pass drops while hardwood compresses a staging row
-group, which the parse thread waits for. Writing the staging file from a
-second thread would hide that.
+A literal whose label is not valid for its datatype (`"abc"^^xsd:int`) is a
+`LITERAL`.
 
-Memory is now the limit: every distinct value of a dictionary group is held
-in a hash map until its dictionary is written. That is fine for the taxonomy;
-for data with billions of distinct values option C replaces the maps, with
-the staging file and the remap kept as they are.
+A provisional id is `group << 32 | n`, where `n` counts the distinct values
+of the group in the order they are first seen (`ProvisionalGroup`). The
+groups are an IRI namespace (the IRI up to its last `/` or `#`; an IRI that
+ends in `/` belongs to the namespace one level up), a literal language, a
+literal datatype, and the big integers.
 
-## Bounded memory: spill and merge
+The statement is appended to `staged-triples`, a Parquet file of seven
+columns: the kind and id of subject, predicate (always an IRI), object and
+context (`StagedTriples`).
 
-The distinct values no longer have to fit in memory. All dictionary groups
-share one budget (`SpillContext`; `RoStore.setLoadMemory`, or
-`-Dsparql.ro.loadMemoryMB` for the `Loader`; by default a quarter of the heap).
-When the values held in memory go over it, the largest groups write their
-values, sorted, with their provisional ids as a run (a small Parquet file),
-and start again empty, until half the budget is used.
+**Memory budget.** All groups share one budget for the values they hold. When
+it is exceeded, the largest groups write their values, sorted, with their
+provisional ids as a *run* in `spill/`, and start empty, until half the
+budget is free. A value seen again after its group spilled gets another
+provisional id; the duplicates meet when the runs are merged. A background
+thread merges a group's runs eight at a time as soon as there are eight,
+while parsing continues.
 
-A value seen again after its group spilled gets another provisional id.
-Equal values meet when the runs are merged, and all their provisional ids get
-the same final id.
+While the values come in, each IRI namespace also records whether all its
+local names are a common prefix followed by a number of a fixed length, such
+as `GO_0005634`. Such a namespace is stored as a bitmap of numbers instead of
+a list of names.
 
-- **In the background:** a merge thread merges a group's runs 8 at a time as
-  soon as it has 8, and merged runs merge again in turn, as in an LSM tree.
-  Parsing does not wait for it.
-- **When finishing a dictionary:** it waits for the group's pending merges,
-  merges whatever runs are left down to at most 8, then merges those with the
-  sorted values still in memory into one sorted stream. Each distinct value is
-  written to the dictionary and its final id recorded for all its provisional
-  ids.
-- Runs are read 1024 rows at a time, so reading many at once stays small.
-- Whether a namespace is a prefix followed by a number is decided as values
-  come in, since the kind of dictionary has to be known before the merged
-  values are written.
-- Big integers are now sorted and deduplicated like everything else.
+### 2. Write the dictionaries
 
-Measured on `taxonomy.rdf`, `-Xmx12g`:
+Each group is finished on its own: its pending merges are awaited, its runs
+merged down to at most eight, and those merged with the values still in
+memory into one sorted stream of distinct values. Each value is written to
+its dictionary and its final id recorded for every provisional id it got, in
+an array per group (8 bytes per provisional id).
 
-| Budget | Wall time | Max RSS | Runs |
-| --- | --- | --- | --- |
-| default (a quarter of the heap, 3 GB) | 141 s | 6.9 GB | none |
-| 64 MB | 114 s | 5.4 GB | 23 |
+| Dictionary | Final id |
+| --- | --- |
+| IRI namespace | `namespace << 32 \| row in the sorted names`, or `\| number` for a prefix-and-number namespace. Namespaces are numbered largest first. |
+| literals | the row in one file holding all groups, each sorted |
+| big integers | the row, with the high bit set |
 
-Spilling is faster here: large hash maps cost more to grow and collect than
-sorting and writing smaller ones.
+### 3. Remap
 
-### Write buffers
+`staged-triples` is read once, in order. Each id is mapped to its final id
+through the arrays, which is an array index, not a lookup. The triple is
+handed to the builder of its predicate, which picks the triple list for its
+subject and object kind.
 
-hardwood buffers a row group per open writer, by default up to 128 MB, and a
-load has a writer open per non-empty triple list of every predicate, plus the
-staging file. Two changes cap this:
+### 4. Sort and write the triple lists
 
-- A triple list creates its writer and batch arrays at its first triple. Most
-  of the 13 lists of a predicate stay empty and now cost nothing, and have no
-  file.
-- Triple lists and the staging file cut a row group at 4 MB
-  (`ParquetTable.LIST_CONFIG`), about 256 000 triples.
+Each list buffers its triples, up to a million. A full buffer is sorted by
+subject, then object, and written as a run next to the list. Building the
+list merges its runs, 64 at a time, into the list file; a list that never
+filled its buffer is sorted in memory and written once. Exact duplicate
+triples are stored once. The rows of the triples in each named graph are
+recorded in a bitmap per graph.
 
-`taxonomy.rdf` with a 64 MB dictionary budget:
+The list is then read back and written again sorted by object, then
+subject, as the list's `-by-object` copy.
 
-| Heap | Row group target | Wall time | Max RSS |
-| --- | --- | --- | --- |
-| 12 GB | 128 MB (before) | 114 s | 5.4 GB |
-| 1 GB | 16 MB | 128 s | 1.3 GB |
-| 512 MB | 16 MB | did not finish: old generation full | |
-| 1 GB | 4 MB | 138 s | 1.4 GB |
-| 512 MB | 4 MB | 144 s | 0.8 GB |
+Finally the staging file, the spill directory and all runs are deleted.
 
-Writer memory still grows with the number of non-empty lists open at once,
-about 4 MB plus hardwood's growth slack each. With the hundreds of predicates
-the README allows, writing the lists one predicate at a time from staged
-triples sorted by predicate would make it constant.
+## Memory
 
-Still in memory: the arrays from provisional to final id, 8 bytes per
-provisional id, and the remap pass, which reads them while it reads the
-staged triples in parse order. For billions of values these would move to
-disk too, with the staged triples sorted per position and merge joined with
-the (provisional, final) pairs: option C in full.
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `RoStore.setLoadMemory(bytes)`, or `-Dsparql.ro.loadMemoryMB` for `Loader` | a quarter of the heap | the distinct values held while parsing |
+| `ParquetTable.LIST_CONFIG` | row groups of 64k triples or 4 MB | the write buffer of each open triple list and of the staging file |
+| `SortedTripleWriter.RUN_TRIPLES` | 1 048 576 | the sort buffer of a triple list, 20 bytes a triple |
 
-## Recommendation (before the implementation)
+Not bounded by a setting:
 
-1. Do **B** now. It removes the lookups, needs one parse, and is a contained
-   change. Write the staging file so that its layout also suits C:
-   triple-ordered Parquet with one column per role.
-2. Replace B's in-memory map with **C** when data stops fitting in memory.
-   The staging file and the remap step stay. Only the way final ids are
-   found changes.
-3. Separately, query time has the same fixed ~1 ms per id-to-string read,
-   which every result value pays. Options: a cache of recently read rows;
-   reading a whole row group per access and keeping it, since the row group of
-   an id is `id / 4096`; or, for IRIs and strings, a memory-mapped offsets file
-   beside the Parquet file for O(1) access.
+- the provisional → final arrays, 8 bytes per provisional id;
+- the open triple lists: one writer and one sort buffer per non-empty list
+  of every predicate, so memory grows with the number of predicates.
 
-## Full taxonomy
+`taxonomy.rdf` (16.5M triples) loads in a 512 MB heap with a 64 MB budget.
 
-`RoStoreTest#taxonomyTripleLoad` loads both taxonomy files, 55 872 533
-triples, and counts them back through the store in 280 s.
+## Measured
+
+`taxonomy.rdf`, 16.5M triples, 1.4 GB of RDF/XML; 8 cores, `-Xmx4g`, JDK 27.
+
+| Step | Default budget | 64 MB budget |
+| --- | --- | --- |
+| 1. Parse and stage | 68 s | 92 s |
+| 2. Write the dictionaries | 20 s | 11 s |
+| 3. Remap | 8 s | 8 s |
+| 4. Sort and write the triple lists | 40 s | 40 s |
+| Whole load | 137 s | 151 s |
+| Max RSS | 3.1 GB | 2.8 GB |
+
+The resulting store is 583 MB; see [storage.md](storage.md) for what it
+holds. Both taxonomy files together, 55.9M triples (53.5M distinct), load
+and are counted back in under five minutes in `RoStoreTest`.
+
+## Bottlenecks
+
+1. **Parsing** is one thread: about 365 000 RDF/XML statements a second for
+   parsing alone, 240 000 with staging. Several files could be parsed in
+   parallel, each with its own handler, if the temp dictionaries were made
+   thread safe.
+2. **Staging is written on the parsing thread.** Its rate drops while
+   hardwood compresses a row group of the staging file. Writing from a
+   second thread would hide that.
+3. **Writing the triple lists** spends 26 of its 40 s writing an identical
+   copy of the namespace table next to every list; see "Duplication" in
+   [storage.md](storage.md). Without it the step takes 14 s.
+4. **Every list is written twice,** once per sort order; the copy sorted by
+   object is made by reading back the first.
+5. **Memory beyond the budget** grows with the number of distinct values
+   (the remap arrays) and with the number of predicates (open lists).
+
+## Limitations
+
+- A store can not be reopened: `RoStore.init()` on an existing directory does
+  not read the IRI dictionaries back, so a store is only usable in the
+  process that loaded it.
+- Named graphs are recorded while loading but not used when reading:
+  statements come back without their context.
+- Loading into a directory that already holds a store is not supported: the
+  triple lists of predicates that only the earlier load had would remain.
