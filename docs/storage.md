@@ -136,6 +136,24 @@ still applied to what is read.
 On the taxonomy store: one subject and predicate, 6 ms; one object and
 predicate (3 statements), 5 ms; all statements of one subject, 68 ms.
 
+### Stars of patterns
+
+Patterns that are joined and share an unbound subject variable, such as
+`?s up:scientificName ?name ; up:rank ?rank ; rdfs:subClassOf ?parent`,
+are evaluated together (`StarJoinOptimizer`, `StarJoinStep`):
+
+- with the subject bound by an enclosing join, each pattern is a lookup of
+  that subject;
+- if a pattern with a bound object has at most 1000 triples, its subjects
+  are looked up in the other patterns;
+- otherwise the lists of all patterns, sorted by subject, are read once and
+  merged, with bound objects as filters on those lists: a subject every
+  pattern has gives the combinations of its objects.
+
+On the taxonomy store all 1.9 million species with their name and parent
+take 4 s; one lookup per pattern per species, as a nested loop join does,
+takes about 8.5 ms per row, hours in all.
+
 ## What the store consists of
 
 ```mermaid

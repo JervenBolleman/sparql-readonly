@@ -428,6 +428,10 @@ public class RoStore extends AbstractSail {
 		stores.put(build.getPredicate(), build);
 	}
 
+	RoDictionaries dictionaries() {
+		return new RoDictionaries(iriDict, literalDict, integerDict);
+	}
+
 	Map<IRI, RoPredicateStore> getPredicateStores() {
 		return stores;
 	}

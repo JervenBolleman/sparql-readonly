@@ -8,6 +8,7 @@ import java.util.Map;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
+import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
@@ -37,7 +38,17 @@ final class RoEvaluationStrategy extends DefaultEvaluationStrategy {
         standard.getOptimizers().forEach(optimizers::add);
         // after the standard ones, which move the filters onto their patterns
         optimizers.add(new FilterPushdownOptimizer(pushed));
+        // last: works on the joins as the others left them
+        optimizers.add(new StarJoinOptimizer());
         setOptimizerPipeline(() -> optimizers);
+    }
+
+    @Override
+    public QueryEvaluationStep precompile(TupleExpr expr, QueryEvaluationContext context) {
+        if (expr instanceof StarJoin star) {
+            return new StarJoinStep(store, star);
+        }
+        return super.precompile(expr, context);
     }
 
     @Override

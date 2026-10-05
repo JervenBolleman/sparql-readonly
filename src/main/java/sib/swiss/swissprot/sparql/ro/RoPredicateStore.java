@@ -10,9 +10,12 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.stream.Stream;
 
 import dev.hardwood.Hardwood;
@@ -231,6 +234,79 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
                     PushedFilter.ListRead read = filter.forObjects(list.objectKind());
                     return read.read() ? list.stream(s, o, read.objects()) : Stream.empty();
                 });
+    }
+
+    /**
+     * The triples of this predicate with subjects of one kind, in the order
+     * of their subject ids, for a merge on subjects.
+     *
+     * @param object null for any object
+     */
+    public Iterator<Statement> inSubjectOrder(Term.Kind subjectKind, Term object) {
+        List<Iterator<Statement>> sources = new ArrayList<>();
+        for (RoResourceRoValueList<?, ?> list : lists()) {
+            if (list.subjectKind() == subjectKind && (object == null || list.objectKind() == object.kind())) {
+                sources.add(list.inSubjectOrder(object));
+            }
+        }
+        if (sources.size() == 1) {
+            return sources.get(0);
+        }
+        return new SubjectMerge(sources);
+    }
+
+    /**
+     * Merges iterators that are each in subject order.
+     */
+    private static final class SubjectMerge implements Iterator<Statement>, AutoCloseable {
+
+        private final PriorityQueue<Head> heads = new PriorityQueue<>();
+
+        private record Head(long subject, Statement statement, Iterator<Statement> rest) implements Comparable<Head> {
+
+            @Override
+            public int compareTo(Head other) {
+                return Long.compare(subject, other.subject);
+            }
+        }
+
+        private SubjectMerge(List<Iterator<Statement>> sources) {
+            for (Iterator<Statement> source : sources) {
+                push(source);
+            }
+        }
+
+        private void push(Iterator<Statement> source) {
+            if (source.hasNext()) {
+                Statement statement = source.next();
+                heads.add(new Head(((RoResource) statement.getSubject()).getLongId(), statement, source));
+            }
+        }
+
+        @Override
+        public boolean hasNext() {
+            return !heads.isEmpty();
+        }
+
+        @Override
+        public void close() throws Exception {
+            for (Head head : heads) {
+                if (head.rest() instanceof AutoCloseable closeable) {
+                    closeable.close();
+                }
+            }
+            heads.clear();
+        }
+
+        @Override
+        public Statement next() {
+            Head head = heads.poll();
+            if (head == null) {
+                throw new NoSuchElementException();
+            }
+            push(head.rest());
+            return head.statement();
+        }
     }
 
     @Override

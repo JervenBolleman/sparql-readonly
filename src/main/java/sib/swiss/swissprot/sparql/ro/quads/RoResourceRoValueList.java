@@ -235,6 +235,22 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
     }
 
+    /**
+     * The triples with this object, in the order of their subjects, for a
+     * merge on subjects.
+     *
+     * @param object null for any object
+     */
+    public Iterator<Statement> inSubjectOrder(Term object) {
+        if (object == null) {
+            return iterator();
+        }
+        return triples.columns(FilterPredicate.eq(OBJECT, object.id()), SCAN_BATCH_SIZE, SUBJECT, OBJECT)
+                .<Iterator<Statement>>map(this::newIterator)
+                .orElseGet(Collections::emptyIterator);
+    }
+
+
     protected abstract RoResourceValueListIterator newIterator(ColumnReaders rows);
 
     protected static abstract class AbstractBuilder<S extends RoResource, O extends RoValue> {
@@ -363,7 +379,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     }
 
     protected abstract class RoResourceValueListIterator
-            implements Iterator<Statement> {
+            implements Iterator<Statement>, AutoCloseable {
 
         private final ColumnReaders batches;
         private boolean open = true;
@@ -389,6 +405,17 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         public Statement statement(S subject, RoIri predicate, O object, RoResource graph) {
             return new RoContextStatement(subject, predicate,
                     object, graph);
+        }
+
+        /**
+         * Releases the readers when not all triples are read.
+         */
+        @Override
+        public void close() {
+            if (open) {
+                batches.close();
+                open = false;
+            }
         }
 
         @Override
