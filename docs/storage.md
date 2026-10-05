@@ -5,12 +5,15 @@ other, and how reading a statement pattern uses them. This describes what is
 implemented; [loading.md](loading.md) describes how the files are written.
 
 The numbers are from a store of `taxonomy.rdf` (16.5M triples, 21
-predicates): 100 MiB on disk in 67 files.
+predicates): 294 MB on disk in 72 files, see "What the store consists of".
 
 ## Layout
 
-All data files are Parquet, written with [hardwood](https://hardwood.dev),
-compressed with zstd. The other files are small binary or text files.
+The triple lists, the namespaces and the big integers are Parquet, written
+with [hardwood](https://hardwood.dev), compressed with zstd. The local names
+of IRIs and the literals are uncompressed values one after the other, each
+with a hash index, see "Dictionaries". The other files are small binary or
+text files.
 
 ```mermaid
 flowchart LR
@@ -23,8 +26,11 @@ flowchart LR
     store --> wide["wideTables/"]
     ns --> nsfile["iri-namespaces<br/><i>Parquet, one row per IRI namespace</i>"]
     ns --> prefixes["prefixes<br/><i>text, prefixes declared in the data</i>"]
-    iri --> iris["iris<br/><i>Parquet, the local names of<br/>all namespaces of names</i>"]
-    other --> literals["literals<br/><i>Parquet, all literals</i>"]
+    iri --> iris["iris<br/><i>the local names of<br/>all namespaces of names</i>"]
+    iri --> irisindex["iris-index<br/><i>hash index of iris</i>"]
+    other --> literals["literals<br/><i>the labels of all literals</i>"]
+    other --> litgroups["literal-groups<br/><i>datatype and language<br/>of each run of labels</i>"]
+    other --> litindex["literals-index<br/><i>hash index of literals</i>"]
     num --> integers["integer_dict<br/><i>Parquet, big integers</i>"]
     lists --> pred["#lt;URL-encoded predicate IRI#gt;/<br/><i>one per predicate, see below</i>"]
     wide --> table["table-#lt;n#gt;<br/><i>Parquet, triple lists merged<br/>on their subjects, see below</i>"]
@@ -113,17 +119,28 @@ On the taxonomy store:
 
 ### Dictionaries
 
-| File | Columns | Row groups | Sorted by |
-| --- | --- | --- | --- |
-| `namespaces/iri-namespaces` | `id` INT64, `namespace` string; for a prefix-and-number namespace also `number_prefix` string, `name_length` INT32, `numbers` bytes | default | id |
-| `iriDictionaries/iris` | `namespace` INT64, `id_col` INT64, `iri_value` string | 4096 rows | namespace, then local name |
-| `otherValueDictionaries/literals` | `id_col` INT64, `label` string, `datatype` string, `language` optional string | 4096 rows | label, within each language or datatype |
-| `numberDictionaries/integer_dict` | `id_col` INT64, `int_long_value` string | 4096 rows | numeric value |
+The local names of IRIs and the labels of literals are each in a file of
+values one after the other, uncompressed: per value its length in bytes as
+an unsigned LEB128 varint, then its UTF-8 bytes. The id of a value is its
+offset in the file, so reading a value is reading at that offset, from a
+memory map (`LinearValues`).
 
-In `iris` the `id_col` is the row of the name within its namespace; in the
-other dictionaries it is the row in the file. Small row groups let a lookup
-by id or by value decode only 4096 rows; in `iris`, statistics on the
-namespace column first narrow a lookup to its namespace.
+| File | Holds | Sorted by |
+| --- | --- | --- |
+| `iriDictionaries/iris` | the local names of the namespaces of names, one namespace after the other | namespace, then local name |
+| `otherValueDictionaries/literals` | the labels of the literals, one language or datatype after the other | label, within each language or datatype |
+| `otherValueDictionaries/literal-groups` | per language or datatype: the offset of its first label, the datatype, the language | offset |
+| `namespaces/iri-namespaces` | Parquet: `id`, `namespace`; for a namespace of names `names_start` and `names_end`, its part of `iris`; for a prefix-and-number namespace `number_prefix`, `name_length`, `numbers` | id |
+| `numberDictionaries/integer_dict` | Parquet: `id_col` INT64, `int_long_value` string, 4096-row row groups | numeric value |
+
+`iris-index` and `literals-index` find the id of a value by its text
+(`HashIndex`): a long with the number of slots, a power of two, then the
+slots, at most 70% in use, filled by linear probing. A slot is 0 when empty,
+otherwise 24 bits of the hash of its value above the offset of the value
+plus one, in 40 bits, so offsets go up to 1 TiB and most other values in a
+probe are passed over on their hash bits alone. The hash is of the UTF-8
+bytes and of the group of the value, its namespace or its language or
+datatype, and a match must also lie in the part of the file of that group.
 
 A namespace whose local names are all one prefix followed by a number of one
 length (`GO_0005634`) has no names in `iris`: its row in `iri-namespaces`
@@ -140,9 +157,9 @@ its value follows from the list it is in.
 
 | Kind | Id |
 | --- | --- |
-| IRI | `namespace (32 bits) \| local id (32 bits)`: the local id is the row of the name within its namespace in `iris`, or the number after the prefix. Namespaces are numbered largest first. |
+| IRI | `namespace (32 bits) \| local id (32 bits)`: the local id is the offset of the name in `iris` from the first name of its namespace, or the number after the prefix. Namespaces are numbered largest first. |
 | blank node | a number given while loading |
-| dictionary literal | the row in `literals` |
+| dictionary literal | the offset of its label in `literals` |
 | `xsd:int` | the value |
 | boolean | 1 or 0 |
 | `xsd:integer` | the value if it is a long without the high bit; otherwise the row in `integer_dict` with the high bit set |
@@ -151,8 +168,8 @@ its value follows from the list it is in.
 flowchart LR
     row["triple list row<br/>subject id | object id"]
     row -->|IRI| split["high 32 bits: namespace<br/>low 32 bits: local id"]
-    split --> nsfile["iris row of the namespace<br/>or prefix + number"]
-    row -->|literal| lit["literals row"]
+    split --> nsfile["offset in iris from the<br/>start of the namespace,<br/>or prefix + number"]
+    row -->|literal| lit["offset in literals"]
     row -->|"xsd:integer,<br/>high bit set"| big["integer_dict row"]
     row -->|"xsd:int, boolean,<br/>small xsd:integer,<br/>blank node"| self["the id is the value"]
 ```
@@ -186,12 +203,22 @@ with contexts, a list reads only the graph columns of those graphs, and
 only the rows where one of them is true. A list without graph columns is
 read only for the default graph.
 
-Literals, and the local names of IRIs in namespaces of names, are decoded
-4096 ids at a time, a row group, along with their datatype and language,
-and the last blocks read are kept: 32 of literals, 64 of local names. The
-values of a list are mostly read along with others of nearby ids, so this
-replaces a filtered read per value, and a literal keeps its label once read.
-On the star join tests this took reading the answers from 32 to 5 s.
+Literals and the local names of IRIs are read at their offset in the memory
+mapped files, and a literal keeps its label once read. A value in a query
+is found by text through the hash index of its dictionary.
+
+On the taxonomy store, against the dictionaries in Parquet:
+
+| | Parquet | Linear and hash index |
+| --- | --- | --- |
+| reading 100 000 names with their subjects | 33 s | 0.4 s |
+| finding 10 000 IRIs by text | 9.3 s | 17 ms |
+| finding 10 000 literals by text | 12.8 s | 15 ms |
+| `getStatements` by subject IRI, 10 000 times | 26 s | 19 s |
+| all 1.9 million species with name and parent, read as text | not done in 25 min | 3.7 s |
+
+What is left of a `getStatements` with a constant, 1.9 ms, is the lookup in
+the triple list.
 
 On the taxonomy store: one subject and predicate, 6 ms; one object and
 predicate (3 statements), 5 ms; all statements of one subject, 68 ms.
@@ -230,13 +257,19 @@ store.
 
 ## What the store consists of
 
+With the dictionaries uncompressed and indexed, the taxonomy store is 294 MB
+in 72 files; with the dictionaries in Parquet it was 100 MiB, of which 35 MB
+dictionaries.
+
 ```mermaid
 pie showData
     title taxonomy.rdf store, MB on disk
-    "triples by subject" : 35
-    "triples by object" : 34
-    "literals" : 29
-    "IRI local names" : 5.5
+    "literals" : 98.6
+    "literals index" : 67.1
+    "triples by object" : 37.7
+    "IRI local names index" : 33.6
+    "triples by subject" : 33.4
+    "IRI local names" : 23.0
     "IRI namespaces" : 0.4
 ```
 
@@ -279,6 +312,7 @@ What is still duplicated:
 
 ## Limitations
 
-- Finding the id of a value, as for a constant in a query, is still one
-  filtered read per value: loading 200 000 IRIs and looking each up by
-  name takes about 100 s in `RoIriDictionaryTest`.
+- The files of local names and literals are not compressed, and their
+  indexes take 8 bytes per slot.
+- The local names of one namespace can take at most 4 GiB, as their offset
+  from its first name is the 32-bit local id; a load that needs more fails.

@@ -161,14 +161,13 @@ public class RoStore extends AbstractSail {
 		File namespacesDir = subDataDirs.get(RoDirectories.NAMESPACES);
 		File namespacesFile = new File(namespacesDir, TempIriDictionary.NAMESPACES_FILE);
 		if (namespacesFile.exists()) {
-			iriDict = RoIriDictionary.open(namespacesFile,
-					new File(subDataDirs.get(RoDirectories.IRI_DICTIONARIES), TempIriDictionary.IRIS_FILE),
-					hardwood);
+			File iris = subDataDirs.get(RoDirectories.IRI_DICTIONARIES);
+			iriDict = RoIriDictionary.open(namespacesFile, new File(iris, TempIriDictionary.IRIS_FILE),
+					new File(iris, TempIriDictionary.IRIS_INDEX_FILE), hardwood);
 		} else {
 			iriDict = new RoIriDictionary(new RoNamespaces());
 		}
-		literalDict = new RoLiteralDict(ParquetTable.open(hardwood,
-				new File(subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), RoLiteralDict.PATH_NAME)));
+		literalDict = RoLiteralDict.open(subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES));
 		integerDict = new RoBigIntegerDict(ParquetTable.open(hardwood,
 				new File(subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), RoBigIntegerDict.PATH_NAME)));
 		readPrefixes(new File(namespacesDir, PREFIXES_FILE));

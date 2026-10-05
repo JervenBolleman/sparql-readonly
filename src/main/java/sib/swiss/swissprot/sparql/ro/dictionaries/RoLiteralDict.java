@@ -1,154 +1,167 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
-import java.util.LinkedHashMap;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
-import dev.hardwood.metadata.LogicalType;
-import dev.hardwood.metadata.PhysicalType;
-import dev.hardwood.metadata.RepetitionType;
-import dev.hardwood.Validity;
-import dev.hardwood.reader.ColumnReader;
-import dev.hardwood.reader.ColumnReaders;
-import dev.hardwood.reader.FilterPredicate;
-import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.util.Values;
 
-import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
-public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
+/**
+ * The literals that are not stored as themselves in the triple lists. Their
+ * labels are in {@link LinearValues}, grouped by language, or by datatype
+ * for literals without one, and sorted within a group. The id of a literal
+ * is the offset of its label. The groups are in a small file of their own,
+ * {@link #GROUPS_FILE}, and a {@link HashIndex} finds the id of a literal.
+ */
+public class RoLiteralDict implements Closeable {
 
+    /**
+     * The labels.
+     */
     public static final String PATH_NAME = "literals";
-    public static final String LABEL = "label";
-    public static final String DATATYPE = "datatype";
-    public static final String LANGUAGE = "language";
-
-    public static final FileSchema SCHEMA = FileSchema.builder(PATH_NAME)
-            .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
-            .addColumn(LABEL, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
-            .addColumn(DATATYPE, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
-            .addColumn(LANGUAGE, PhysicalType.BYTE_ARRAY, RepetitionType.OPTIONAL, new LogicalType.StringType())
-            .build();
+    /**
+     * Per group, in the order of the labels: the offset of its first label,
+     * its datatype and its language, if it has one.
+     */
+    public static final String GROUPS_FILE = "literal-groups";
+    /**
+     * The {@link HashIndex} of the labels.
+     */
+    public static final String INDEX_FILE = "literals-index";
 
     /**
-     * Literals read at a time, as many as a row group holds: a literal is
-     * mostly read along with others of nearby ids, the objects of one
-     * subject or of subjects next to each other.
+     * A datatype or language and where its labels start.
      */
-    private static final int BLOCK_SIZE = 4096;
-    private static final int CACHED_BLOCKS = 32;
-
-    /**
-     * The literals of a block of ids, starting at a multiple of
-     * {@link #BLOCK_SIZE}.
-     */
-    private record Block(String[] labels, IRI[] datatypes, String[] languages) {
+    public record Group(long start, IRI datatype, String language) {
     }
 
-    /**
-     * The blocks read last, least recently used first.
-     */
-    private final Map<Long, Block> blocks = new LinkedHashMap<>(CACHED_BLOCKS * 2, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Long, Block> eldest) {
-            return size() > CACHED_BLOCKS;
-        }
-    };
-    /**
-     * Datatypes are few: one IRI each.
-     */
-    private final Map<String, IRI> datatypes = new ConcurrentHashMap<>();
+    private final LinearValues labels;
+    private final HashIndex index;
+    private final long[] starts;
+    private final List<Group> groups;
+    private final Map<String, Integer> byLanguage = new HashMap<>();
+    private final Map<String, Integer> byDatatype = new HashMap<>();
 
-    public RoLiteralDict(ParquetTable table) {
-        super(table, LABEL);
-    }
-
-    /**
-     * @return the block holding the literal, null if there is none
-     */
-    private Block block(long id) {
-        long start = id - Math.floorMod(id, BLOCK_SIZE);
-        synchronized (blocks) {
-            Block block = blocks.get(start);
-            if (block != null) {
-                return block;
+    private RoLiteralDict(LinearValues labels, HashIndex index, List<Group> groups) {
+        this.labels = labels;
+        this.index = index;
+        this.groups = groups;
+        this.starts = new long[groups.size()];
+        for (int g = 0; g < groups.size(); g++) {
+            Group group = groups.get(g);
+            starts[g] = group.start();
+            if (group.language() != null) {
+                byLanguage.put(group.language(), g);
+            } else {
+                byDatatype.put(group.datatype().stringValue(), g);
             }
         }
-        Block block = read(start);
-        synchronized (blocks) {
-            blocks.put(start, block);
-        }
-        return block;
     }
 
-    private Block read(long start) {
-        String[] labels = new String[BLOCK_SIZE];
-        IRI[] types = new IRI[BLOCK_SIZE];
-        String[] languages = new String[BLOCK_SIZE];
-        FilterPredicate inBlock = FilterPredicate.and(FilterPredicate.gtEq(ID, start),
-                FilterPredicate.lt(ID, start + BLOCK_SIZE));
-        Optional<ColumnReaders> batches = table.columns(inBlock, BLOCK_SIZE, ID, LABEL, DATATYPE, LANGUAGE);
-        if (batches.isPresent()) {
-            try (ColumnReaders rows = batches.get()) {
-                while (rows.nextBatch()) {
-                    long[] ids = rows.getColumnReader(ID).getLongs();
-                    String[] batchLabels = rows.getColumnReader(LABEL).getStrings();
-                    String[] batchTypes = rows.getColumnReader(DATATYPE).getStrings();
-                    ColumnReader language = rows.getColumnReader(LANGUAGE);
-                    String[] batchLanguages = language.getStrings();
-                    Validity present = language.getLeafValidity();
-                    for (int i = 0; i < ids.length; i++) {
-                        int at = (int) (ids[i] - start);
-                        labels[at] = batchLabels[i];
-                        types[at] = datatypes.computeIfAbsent(batchTypes[i], Values::iri);
-                        if (present.isNotNull(i) && batchLanguages[i] != null && !batchLanguages[i].isEmpty()) {
-                            languages[at] = batchLanguages[i];
-                        }
-                    }
+    /**
+     * @return the dictionary in the directory, empty if it has none
+     */
+    public static RoLiteralDict open(File directory) throws IOException {
+        List<Group> groups = readGroups(new File(directory, GROUPS_FILE));
+        LinearValues labels = LinearValues.open(new File(directory, PATH_NAME));
+        try {
+            return new RoLiteralDict(labels, HashIndex.open(new File(directory, INDEX_FILE)), groups);
+        } catch (IOException | RuntimeException e) {
+            labels.close();
+            throw e;
+        }
+    }
+
+    private static List<Group> readGroups(File file) throws IOException {
+        List<Group> groups = new ArrayList<>();
+        if (!file.exists()) {
+            return groups;
+        }
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {
+            int size = in.readInt();
+            for (int g = 0; g < size; g++) {
+                long start = in.readLong();
+                IRI datatype = Values.iri(in.readUTF());
+                String language = in.readBoolean() ? in.readUTF() : null;
+                groups.add(new Group(start, datatype, language));
+            }
+        }
+        return groups;
+    }
+
+    /**
+     * Writes the groups, see {@link #GROUPS_FILE}.
+     */
+    public static void writeGroups(File file, List<Group> groups) throws IOException {
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
+            out.writeInt(groups.size());
+            for (Group group : groups) {
+                out.writeLong(group.start());
+                out.writeUTF(group.datatype().stringValue());
+                out.writeBoolean(group.language() != null);
+                if (group.language() != null) {
+                    out.writeUTF(group.language());
                 }
             }
         }
-        return new Block(labels, types, languages);
     }
 
-    @Override
+    /**
+     * @return the group of a literal for the {@link HashIndex}: its language,
+     * or its datatype if it has none, null if no stored literal has it
+     */
+    private Integer groupOf(Literal value) {
+        Optional<String> language = value.getLanguage();
+        return language.isPresent() ? byLanguage.get(language.get())
+                : byDatatype.get(value.getDatatype().stringValue());
+    }
+
     public Optional<RoLiteral> find(Literal value) {
-        final String label = value.stringValue();
-        final Optional<String> language = value.getLanguage();
-        final FilterPredicate filter;
-        if (language.isPresent()) {
-            filter = FilterPredicate.and(FilterPredicate.eq(LABEL, label),
-                    FilterPredicate.eq(LANGUAGE, language.get()));
-        } else {
-            filter = FilterPredicate.and(FilterPredicate.eq(LABEL, label),
-                    FilterPredicate.eq(DATATYPE, value.getDatatype().stringValue()),
-                    FilterPredicate.isNull(LANGUAGE));
+        Integer group = groupOf(value);
+        if (group == null) {
+            return Optional.empty();
         }
-        return findId(filter).map(id -> new RoSimpleLiteral(id, this));
+        byte[] label = value.getLabel().getBytes(StandardCharsets.UTF_8);
+        long start = starts[group];
+        long end = group + 1 < starts.length ? starts[group + 1] : labels.size();
+        long offset = index.find(HashIndex.hash(label, group),
+                at -> at >= start && at < end && labels.equalsAt(at, label));
+        return offset < 0 ? Optional.empty() : Optional.of(new RoSimpleLiteral(offset, this));
+    }
+
+    /**
+     * @return the group of the literal with this id
+     */
+    private Group group(long id) {
+        int at = Arrays.binarySearch(starts, id);
+        // between two starts: the group of the one before
+        return groups.get(at >= 0 ? at : -at - 2);
     }
 
     public String stringValue(long id) {
-        String label = block(id).labels()[Math.floorMod(id, BLOCK_SIZE)];
-        if (label == null) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
-            return "";
-        }
-        return label;
+        return labels.string(id);
     }
 
     public IRI dataType(long id) {
-        IRI datatype = block(id).datatypes()[Math.floorMod(id, BLOCK_SIZE)];
-        if (datatype == null) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
-        }
-        return datatype;
+        return group(id).datatype();
     }
 
     public RoLiteral get(long id) {
@@ -156,6 +169,12 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public Optional<String> language(long id) {
-        return Optional.ofNullable(block(id).languages()[Math.floorMod(id, BLOCK_SIZE)]);
+        return Optional.ofNullable(group(id).language());
+    }
+
+    @Override
+    public void close() throws IOException {
+        labels.close();
+        index.close();
     }
 }

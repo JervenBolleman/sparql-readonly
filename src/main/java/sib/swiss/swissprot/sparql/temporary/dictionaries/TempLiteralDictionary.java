@@ -2,8 +2,9 @@ package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,16 +14,11 @@ import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 
-import sib.swiss.swissprot.sparql.ro.ParquetTable;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
+import sib.swiss.swissprot.sparql.ro.dictionaries.HashIndex;
+import sib.swiss.swissprot.sparql.ro.dictionaries.LinearValues;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
-import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.DATATYPE;
-import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LABEL;
-import static sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict.LANGUAGE;
 
 public class TempLiteralDictionary extends TempDictionary {
-
-    private static final int BATCH_SIZE = 64 * 1024;
 
     /**
      * Literals with a language are grouped per language, the others per
@@ -74,81 +70,41 @@ public class TempLiteralDictionary extends TempDictionary {
     }
 
     /**
-     * Writes all literals into one dictionary, sorted per group. The id of a
-     * literal is its row.
+     * Writes all literals into one dictionary, sorted per group, and its
+     * index. The id of a literal is the offset of its label.
      */
     public RoLiteralDict load() throws IOException {
-        File file = new File(out, RoLiteralDict.PATH_NAME);
-        if (file.exists()) {
-            file.delete();
+        File labels = new File(out, RoLiteralDict.PATH_NAME);
+        File groupsFile = new File(out, RoLiteralDict.GROUPS_FILE);
+        File index = new File(out, RoLiteralDict.INDEX_FILE);
+        for (File file : List.of(labels, groupsFile, index)) {
+            Files.deleteIfExists(file.toPath());
         }
         if (groups.isEmpty()) {
-            // without literals there is no file
-            return new RoLiteralDict(ParquetTable.open(hardwood, file));
+            // without literals there are no files
+            return RoLiteralDict.open(out);
         }
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
-            LiteralBatch batch = new LiteralBatch(writer);
+        long values = 0;
+        for (ProvisionalGroup<String> group : groups) {
+            values += group.provisionalIds();
+        }
+        List<RoLiteralDict.Group> written = new ArrayList<>();
+        try (LinearValues.Writer writer = new LinearValues.Writer(labels);
+                HashIndex.Writer hashes = new HashIndex.Writer(index, values)) {
             for (ProvisionalGroup<String> group : groups) {
                 Literal example = exampleOfGroup.get(group.index());
-                final byte[] datatype = stringAsUtf8ByteArray(example.getDatatype().stringValue());
-                final String language = example.getLanguage().orElse(null);
-                final byte[] languageBytes = language == null ? null : stringAsUtf8ByteArray(language);
-                group.finish(label -> batch.add(label, datatype, languageBytes));
+                final long groupIndex = written.size();
+                written.add(new RoLiteralDict.Group(writer.position(), example.getDatatype(),
+                        example.getLanguage().orElse(null)));
+                group.finish(label -> {
+                    byte[] bytes = label.getBytes(StandardCharsets.UTF_8);
+                    long offset = writer.add(bytes);
+                    hashes.add(HashIndex.hash(bytes, groupIndex), offset);
+                    return offset;
+                });
             }
-            batch.flush();
         }
-        return new RoLiteralDict(ParquetTable.open(hardwood, file));
-    }
-
-    /**
-     * Collects literal rows, the id of a literal is its row number.
-     */
-    private static final class LiteralBatch {
-
-        private final ParquetTable.Writer writer;
-        private final long[] ids = new long[BATCH_SIZE];
-        private final byte[][] labels = new byte[BATCH_SIZE][];
-        private final byte[][] datatypes = new byte[BATCH_SIZE][];
-        private final byte[][] languages = new byte[BATCH_SIZE][];
-        private final boolean[] noLanguage = new boolean[BATCH_SIZE];
-        private int size;
-        private long index;
-
-        private LiteralBatch(ParquetTable.Writer writer) {
-            this.writer = writer;
-        }
-
-        /**
-         * @param language null for a literal without
-         * @return the id of the literal
-         */
-        private long add(String label, byte[] datatype, byte[] language) throws IOException {
-            if (size == BATCH_SIZE) {
-                flush();
-            }
-            ids[size] = index;
-            labels[size] = stringAsUtf8ByteArray(label);
-            datatypes[size] = datatype;
-            languages[size] = language;
-            noLanguage[size] = language == null;
-            size++;
-            return index++;
-        }
-
-        private void flush() throws IOException {
-            if (size == 0) {
-                return;
-            }
-            final long[] i = Arrays.copyOf(ids, size);
-            final byte[][] l = Arrays.copyOf(labels, size);
-            final byte[][] d = Arrays.copyOf(datatypes, size);
-            final byte[][] lang = Arrays.copyOf(languages, size);
-            final boolean[] nulls = Arrays.copyOf(noLanguage, size);
-            writer.writeBatch(b -> b.longs(RoDictionary.ID, i)
-                    .bytes(LABEL, l)
-                    .bytes(DATATYPE, d)
-                    .bytes(LANGUAGE, lang, nulls));
-            size = 0;
-        }
+        RoLiteralDict.writeGroups(groupsFile, written);
+        return RoLiteralDict.open(out);
     }
 }
