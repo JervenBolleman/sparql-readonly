@@ -2,11 +2,9 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Map;
 import dev.hardwood.Hardwood;
 import dev.hardwood.reader.ColumnReaders;
 
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.Term;
 
@@ -20,12 +18,9 @@ public class BnodeLiteralList extends RoResourceRoValueList<RoBnode, RoLiteral> 
     public BnodeLiteralList(File file, RoIri predicate,
             RoDictionaries dictionaries, Hardwood hardwood)
             throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
+        super(file, predicate, dictionaries, hardwood);
     }
 
-    private BnodeLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
-    }
 
     @Override
     protected RoBnode getSubject(long id) {
@@ -61,7 +56,7 @@ public class BnodeLiteralList extends RoResourceRoValueList<RoBnode, RoLiteral> 
 
         public BnodeLiteralList build() throws IOException {
             save();
-            return new BnodeLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
+            return new BnodeLiteralList(file, predicate, dictionaries, hardwood);
         }
     }
 

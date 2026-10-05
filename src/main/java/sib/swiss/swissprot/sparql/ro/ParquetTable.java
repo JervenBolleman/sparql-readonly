@@ -3,6 +3,7 @@ package sib.swiss.swissprot.sparql.ro;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -15,6 +16,7 @@ import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.reader.RowReader;
 import dev.hardwood.schema.ColumnProjection;
+import dev.hardwood.schema.ColumnSchema;
 import dev.hardwood.schema.FileSchema;
 import dev.hardwood.writer.ColumnBatch;
 import dev.hardwood.writer.ParquetFileWriter;
@@ -74,6 +76,17 @@ public final class ParquetTable implements Closeable {
 
     public boolean isEmpty() {
         return numberOfRows() == 0;
+    }
+
+    /**
+     * @return the names of the columns, in schema order; none for a table
+     * without a file
+     */
+    public List<String> columnNames() {
+        if (reader == null) {
+            return List.of();
+        }
+        return reader.getFileSchema().getColumns().stream().map(ColumnSchema::name).toList();
     }
 
     /**

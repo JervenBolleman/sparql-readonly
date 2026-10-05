@@ -3,11 +3,9 @@ package sib.swiss.swissprot.sparql.ro.quads;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Map;
 import dev.hardwood.Hardwood;
 import dev.hardwood.reader.ColumnReaders;
 
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.Term;
 
@@ -23,12 +21,9 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
  */
 public class BnodeBigIntegerList extends RoResourceRoValueList<RoBnode, RoBigIntegerLiteral> {
 
-    public BnodeBigIntegerList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
-    }
 
     public BnodeBigIntegerList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
+        super(file, predicate, dictionaries, hardwood);
     }
 
     @Override
@@ -68,7 +63,7 @@ public class BnodeBigIntegerList extends RoResourceRoValueList<RoBnode, RoBigInt
 
         public BnodeBigIntegerList build() throws IOException {
             save();
-            return new BnodeBigIntegerList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
+            return new BnodeBigIntegerList(file, predicate, dictionaries, hardwood);
         }
     }
 

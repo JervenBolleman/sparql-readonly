@@ -42,7 +42,6 @@ flowchart LR
     pred --> predfile["predicate<br/><i>8 bytes: the predicate's IRI id</i>"]
     pred --> list["#lt;list#gt;<br/><i>Parquet: triples sorted by subject</i>"]
     pred --> byobj["#lt;list#gt;-by-object<br/><i>Parquet: the same triples, sorted by object</i>"]
-    pred --> graphs["#lt;list#gt;-graphs<br/><i>rows of #lt;list#gt; per named graph,<br/>only if it has triples in one</i>"]
     pred --> widefile["#lt;list#gt;-wide<br/><i>text: the wide table and column<br/>that replace #lt;list#gt;</i>"]
 ```
 
@@ -62,25 +61,38 @@ Its `-by-object` copy holds the same triples sorted by object, then subject.
 Row groups hold 64k triples, so that statistics on the sorted column let a
 lookup skip all but the row group that holds its value.
 
-A `-graphs` file holds the number of named graphs, then per graph whether
-it is an IRI, its id and a serialized `RoaringBitmap` of the rows of the list
-in that graph.
+### Graphs
+
+A list with triples in named graphs has a `BOOLEAN` column per graph, true
+for the triples in that graph, and one for the default graph:
+
+| Column | Graph |
+| --- | --- |
+| `g_i<id>` | the IRI with this id |
+| `g_b<id>` | the blank node with this id |
+| `g_default` | the default graph |
+
+A triple in several graphs is one row with several of these true. A list
+whose triples are all in the default graph has none of these columns. Its
+`-by-object` copy has the same columns. A statement is read once per graph
+it is in, with that graph as its context, as RDF4J's own stores do: a
+pattern on the default graph, the union of all graphs, sees a triple in two
+graphs twice.
 
 ### Wide tables
 
 Lists with one object per subject whose subjects largely overlap are
 merged into one wide table: a `subject` column and one
 `INT64` column of objects per list, `p0`, `p1`, …, null where a subject has
-no triple in that list. The subjects, otherwise stored in each of these
+no triple in that list, each followed by the graph columns of its list,
+prefixed with its name: `p0_g_i<id>`, `p0_g_default`, …. The subjects, otherwise stored in each of these
 lists, are stored once. A merged list keeps its `-by-object` copy; its file
 sorted by subject is replaced by `<list>-wide`, a line with the table's path
 relative to the predicate directory, a tab, and the column.
 
-Merged lists may be in different named graphs. A merged list keeps its
-`-graphs` file, with its rows translated to rows of the table: the n-th
-triple of the list, sorted by subject, is in the table row of its subject.
-A triple that is in several graphs is stored once per graph, so its subject
-has more than one row and the list is not merged.
+Merged lists may be in different named graphs, and a triple in several
+graphs is one row, so a list is merged whatever its graphs. Each keeps its
+own graph columns.
 
 Which lists are merged is set by `RoStore.setWideTableOverlap(percent)`, or
 `-Dsparql.ro.wideTableOverlap` for `Loader`, default 90. Lists are taken
@@ -225,8 +237,9 @@ The first version of this store, at 583 MiB and about 27 000 files, held:
    that nothing read, and 26 of the 40 seconds of writing the triple lists.
    The table is now written once, as `namespaces/iri-namespaces`, and read
    by `RoStore.init()`.
-2. **Two context files per list, also without named graphs:** 546 files. A
-   list now has one `-graphs` file, only if it has triples in a named graph.
+2. **Two context files per list, also without named graphs:** 546 files.
+   The graphs of a list are now columns in it, only if it has triples in a
+   named graph.
 3. **One dictionary file per namespace:** 25 912 files holding 11.7 MB in
    111 MB of filesystem blocks. All local names are now in one file, `iris`,
    and the prefix-and-number namespaces in the rows of `iri-namespaces`.
@@ -254,5 +267,6 @@ What is still duplicated:
 
 ## Limitations
 
-- Context bitmaps are written but not read: statements come back without
-  their context.
+- A pattern on named graphs, `GRAPH <g> { … }` or `getStatements` with
+  contexts, reads all graphs of the list and drops the others afterwards:
+  the graph columns are not yet a Parquet filter.

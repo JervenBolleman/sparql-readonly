@@ -2,11 +2,9 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Map;
 import dev.hardwood.Hardwood;
 import dev.hardwood.reader.ColumnReaders;
 
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.Term;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
@@ -17,13 +15,9 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntegerLiteral> {
 
-    public IriIntegerLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood)
-            throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
-    }
 
     public IriIntegerLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
+        super(file, predicate, dictionaries, hardwood);
     }
 
     @Override
@@ -61,7 +55,7 @@ public class IriIntegerLiteralList extends RoResourceRoValueList<RoIri, RoIntege
 
         public IriIntegerLiteralList build() throws IOException {
             save();
-            return new IriIntegerLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
+            return new IriIntegerLiteralList(file, predicate, dictionaries, hardwood);
         }
 
     }

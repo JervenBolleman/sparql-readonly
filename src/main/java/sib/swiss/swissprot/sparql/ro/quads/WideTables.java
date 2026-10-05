@@ -17,7 +17,6 @@ import dev.hardwood.metadata.PhysicalType;
 import dev.hardwood.metadata.RepetitionType;
 import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.schema.FileSchema;
-import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 
@@ -34,10 +33,9 @@ import sib.swiss.swissprot.sparql.ro.ParquetTable;
  * table relative to the list's directory and the name of its column.
  *
  * <p>
- * The lists may be in different named graphs. A merged list keeps its
- * {@code -graphs} file, its rows translated to the rows of the table: as
- * both are sorted by subject, the n-th triple of the list is in the row of
- * the table with its subject.
+ * The lists may be in different named graphs: the graph columns of a list,
+ * see {@link GraphColumns}, are copied to the table prefixed with its object
+ * column, so that each list keeps its own.
  */
 public final class WideTables {
 
@@ -78,7 +76,7 @@ public final class WideTables {
     /**
      * A list that may be merged: one object per subject.
      */
-    private record Candidate(File list, boolean iriSubjects, long[] subjects) {
+    private record Candidate(File list, boolean iriSubjects, long[] subjects, List<String> graphs) {
     }
 
     /**
@@ -134,7 +132,6 @@ public final class WideTables {
             write(table, group, groupSubjects.get(g), hardwood);
             for (int c = 0; c < group.size(); c++) {
                 File list = group.get(c).list();
-                moveGraphs(list, group.get(c).subjects(), groupSubjects.get(g));
                 String relative = list.getParentFile().toPath().relativize(table.toPath()).toString();
                 Files.writeString(pointerFile(list).toPath(), relative + "\t" + column(c) + "\n",
                         StandardCharsets.UTF_8);
@@ -149,36 +146,6 @@ public final class WideTables {
 
     private static String column(int index) {
         return "p" + index;
-    }
-
-    /**
-     * Translates the rows of the list in its named graphs, if it has any,
-     * to the rows of the table.
-     *
-     * @param subjects the subjects of the list, sorted
-     * @param tableSubjects the subjects of the table, sorted, a superset
-     */
-    private static void moveGraphs(File list, long[] subjects, long[] tableSubjects) throws IOException {
-        List<RoResourceRoValueList.Graph> graphs = RoResourceRoValueList.readGraphs(list);
-        if (graphs.isEmpty()) {
-            return;
-        }
-        int[] tableRows = new int[subjects.length];
-        int t = 0;
-        for (int r = 0; r < subjects.length; r++) {
-            while (tableSubjects[t] != subjects[r]) {
-                t++;
-            }
-            tableRows[r] = t;
-        }
-        List<RoResourceRoValueList.Graph> moved = new ArrayList<>();
-        for (RoResourceRoValueList.Graph graph : graphs) {
-            RoaringBitmap rows = new RoaringBitmap();
-            graph.rows().forEach((int row) -> rows.add(tableRows[row]));
-            rows.runOptimize();
-            moved.add(new RoResourceRoValueList.Graph(graph.iri(), graph.id(), rows));
-        }
-        RoResourceRoValueList.writeGraphs(list, moved);
     }
 
     /**
@@ -205,7 +172,11 @@ public final class WideTables {
                 }
                 long[] subjects = distinctSubjects(list, hardwood);
                 if (subjects != null) {
-                    candidates.add(new Candidate(list, list.getName().startsWith("iri_"), subjects));
+                    List<String> graphs;
+                    try (ParquetTable table = ParquetTable.open(hardwood, list)) {
+                        graphs = GraphColumns.in(table, "");
+                    }
+                    candidates.add(new Candidate(list, list.getName().startsWith("iri_"), subjects, graphs));
                 }
             }
         }
@@ -292,23 +263,32 @@ public final class WideTables {
                 .addColumn(RoResourceRoValueList.SUBJECT, PhysicalType.INT64, RepetitionType.REQUIRED);
         for (int c = 0; c < group.size(); c++) {
             schema.addColumn(column(c), PhysicalType.INT64, RepetitionType.OPTIONAL);
+            for (String graph : group.get(c).graphs()) {
+                schema.addColumn(GraphColumns.prefix(column(c)) + graph, PhysicalType.BOOLEAN,
+                        RepetitionType.REQUIRED);
+            }
         }
         int columns = group.size();
         List<ListReader> readers = new ArrayList<>();
         try (ParquetTable.Writer writer = new ParquetTable.Writer(table, schema.build(), ParquetTable.LIST_CONFIG)) {
             for (Candidate candidate : group) {
-                readers.add(new ListReader(candidate.list(), hardwood));
+                readers.add(new ListReader(candidate.list(), candidate.graphs(), hardwood));
             }
             for (int start = 0; start < subjects.length; start += BATCH_SIZE) {
                 int size = Math.min(BATCH_SIZE, subjects.length - start);
                 long[] batchSubjects = Arrays.copyOfRange(subjects, start, start + size);
                 long[][] objects = new long[columns][size];
                 boolean[][] nulls = new boolean[columns][size];
+                boolean[][][] inGraph = new boolean[columns][][];
                 for (int c = 0; c < columns; c++) {
                     ListReader reader = readers.get(c);
+                    inGraph[c] = new boolean[group.get(c).graphs().size()][size];
                     for (int r = 0; r < size; r++) {
                         if (reader.at(batchSubjects[r])) {
                             objects[c][r] = reader.object();
+                            for (int g = 0; g < inGraph[c].length; g++) {
+                                inGraph[c][g][r] = reader.inGraph(g);
+                            }
                         } else {
                             nulls[c][r] = true;
                         }
@@ -318,6 +298,10 @@ public final class WideTables {
                     b.longs(RoResourceRoValueList.SUBJECT, batchSubjects);
                     for (int c = 0; c < columns; c++) {
                         b.longs(column(c), objects[c], nulls[c]);
+                        List<String> graphs = group.get(c).graphs();
+                        for (int g = 0; g < graphs.size(); g++) {
+                            b.booleans(GraphColumns.prefix(column(c)) + graphs.get(g), inGraph[c][g]);
+                        }
                     }
                 });
             }
@@ -337,12 +321,16 @@ public final class WideTables {
         private final ColumnReaders batches;
         private long[] subjects = new long[0];
         private long[] objects = new long[0];
+        private final List<String> graphs;
+        private boolean[][] inGraph;
         private int next;
 
-        private ListReader(File list, Hardwood hardwood) throws IOException {
+        private ListReader(File list, List<String> graphs, Hardwood hardwood) throws IOException {
             this.table = ParquetTable.open(hardwood, list);
-            this.batches = table.columns(BATCH_SIZE, RoResourceRoValueList.SUBJECT, RoResourceRoValueList.OBJECT)
-                    .orElseThrow();
+            this.graphs = graphs;
+            List<String> columns = new ArrayList<>(List.of(RoResourceRoValueList.SUBJECT, RoResourceRoValueList.OBJECT));
+            columns.addAll(graphs);
+            this.batches = table.columns(BATCH_SIZE, columns.toArray(String[]::new)).orElseThrow();
         }
 
         /**
@@ -360,14 +348,26 @@ public final class WideTables {
                 if (!batches.nextBatch()) {
                     return false;
                 }
-                subjects = batches.getColumnReader(0).getLongs();
-                objects = batches.getColumnReader(1).getLongs();
+                subjects = batches.getColumnReader(RoResourceRoValueList.SUBJECT).getLongs();
+                objects = batches.getColumnReader(RoResourceRoValueList.OBJECT).getLongs();
+                inGraph = new boolean[graphs.size()][];
+                for (int g = 0; g < inGraph.length; g++) {
+                    inGraph[g] = batches.getColumnReader(graphs.get(g)).getBooleans();
+                }
                 next = 0;
             }
         }
 
         long object() {
             return objects[next];
+        }
+
+        /**
+         * @return whether the triple of the subject is in the g-th graph of
+         * the list
+         */
+        boolean inGraph(int g) {
+            return inGraph[g][next];
         }
 
         @Override

@@ -1,23 +1,15 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.Closeable;
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Spliterator;
@@ -33,7 +25,6 @@ import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
@@ -64,8 +55,6 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             .addColumn(SUBJECT, PhysicalType.INT64, RepetitionType.REQUIRED)
             .addColumn(OBJECT, PhysicalType.INT64, RepetitionType.REQUIRED)
             .build();
-    protected final Map<RoIri, RoaringBitmap> iriGraphsMap;
-    protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap;
     protected final RoIri predicate;
     /**
      * The triples sorted by subject: the list's own file, or a column of a
@@ -86,6 +75,16 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
      */
     private final ParquetTable byObject;
     private final WideTables.Column wide;
+    /**
+     * The graph columns of the list, see {@link GraphColumns}, without the
+     * prefix they have in a wide table; none if it is all in the default
+     * graph.
+     */
+    private final List<String> graphColumns;
+    /**
+     * The graph of each graph column, null for the default graph.
+     */
+    private final List<RoResource> graphs;
 
     protected final RoDictionaries dictionaries;
 
@@ -133,13 +132,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     }
 
     protected RoResourceRoValueList(File file, RoIri predicate,
-            Map<RoIri, RoaringBitmap> iriGraphsMap,
-            Map<RoBnode, RoaringBitmap> bNodeGraphsMap,
             RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
         super();
         this.predicate = predicate;
-        this.iriGraphsMap = iriGraphsMap;
-        this.bNodeGraphsMap = bNodeGraphsMap;
         Optional<WideTables.Column> wide = WideTables.columnOf(file);
         this.wide = wide.orElse(null);
         if (wide.isPresent()) {
@@ -153,6 +148,35 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         }
         this.byObject = ParquetTable.open(hardwood, byObjectFile(file));
         this.dictionaries = dictionaries;
+        this.graphColumns = GraphColumns.in(bySubject, graphPrefix());
+        this.graphs = new ArrayList<>();
+        for (String column : graphColumns) {
+            graphs.add(GraphColumns.graph(column, dictionaries.getIriDict()));
+        }
+    }
+
+    /**
+     * @return the prefix of the graph columns of this list in its table
+     * sorted by subject
+     */
+    private String graphPrefix() {
+        return wide == null ? "" : GraphColumns.prefix(objectColumn);
+    }
+
+    /**
+     * @return the graph columns of this list in its table sorted by subject,
+     * with their prefix
+     */
+    public List<String> graphColumns() {
+        return graphColumns.stream().map(c -> graphPrefix() + c).toList();
+    }
+
+    /**
+     * @return the graph of each of {@link #graphColumns()}, null for the
+     * default graph
+     */
+    public List<RoResource> graphs() {
+        return graphs;
     }
 
     @Override
@@ -165,117 +189,13 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return new File(file.getParentFile(), file.getName() + "-by-object");
     }
 
-    /**
-     * The rows of the list in each named graph. Only a list with triples in
-     * named graphs has this file: the number of graphs, then per graph
-     * whether it is an IRI, its id and a serialized RoaringBitmap of rows.
-     */
-    static File graphsFile(File file) {
-        return new File(file.getParentFile(), file.getName() + "-graphs");
-    }
-
-    /**
-     * The rows of a list in one named graph.
-     *
-     * @param iri whether the graph is an IRI, else a blank node
-     * @param id the id of the graph
-     * @param rows the rows of the triples sorted by subject in the graph
-     */
-    record Graph(boolean iri, long id, RoaringBitmap rows) {
-    }
-
-    /**
-     * @return the named graphs of the list, none if it has no
-     * {@link #graphsFile(File)}
-     */
-    static List<Graph> readGraphs(File file) throws IOException {
-        File graphs = graphsFile(file);
-        List<Graph> read = new ArrayList<>();
-        if (!graphs.exists()) {
-            return read;
-        }
-        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(graphs)))) {
-            int numberOfGraphs = in.readInt();
-            for (int i = 0; i < numberOfGraphs; i++) {
-                boolean iri = in.readBoolean();
-                long id = in.readLong();
-                RoaringBitmap rows = new RoaringBitmap();
-                rows.deserialize(in);
-                read.add(new Graph(iri, id, rows));
-            }
-        }
-        return read;
-    }
-
-    /**
-     * Writes the {@link #graphsFile(File)} of a list, or removes it if there
-     * are no graphs.
-     */
-    static void writeGraphs(File file, List<Graph> graphs) throws IOException {
-        File graphsFile = graphsFile(file);
-        if (graphs.isEmpty()) {
-            Files.deleteIfExists(graphsFile.toPath());
-            return;
-        }
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(graphsFile)))) {
-            out.writeInt(graphs.size());
-            for (Graph graph : graphs) {
-                out.writeBoolean(graph.iri());
-                out.writeLong(graph.id());
-                graph.rows().serialize(out);
-            }
-        }
-    }
-
-    protected static Map<RoIri, RoaringBitmap> getRoIriGraphsMap(File file, RoIriDictionary iriDict)
-            throws IOException {
-        Map<RoIri, RoaringBitmap> map = new HashMap<>();
-        for (Graph graph : readGraphs(file)) {
-            if (graph.iri()) {
-                map.put(new RoIri(graph.id(), iriDict), graph.rows());
-            }
-        }
-        return map;
-    }
-
-    protected static Map<RoBnode, RoaringBitmap> getRoBnodeGraphsMap(File file) throws IOException {
-        Map<RoBnode, RoaringBitmap> map = new HashMap<>();
-        for (Graph graph : readGraphs(file)) {
-            if (!graph.iri()) {
-                map.put(new RoBnode(graph.id()), graph.rows());
-            }
-        }
-        return map;
-    }
-
-    public RoResource findGraphForTriple(int at) {
-        // return graph if there is only one
-        if (iriGraphsMap.size() == 1 && bNodeGraphsMap.isEmpty()) {
-            return iriGraphsMap.entrySet().iterator().next().getKey();
-        } else if (iriGraphsMap.isEmpty() && bNodeGraphsMap.size() == 1) {
-            return bNodeGraphsMap.entrySet().iterator().next().getKey();
-        }
-
-        for (Entry<RoIri, RoaringBitmap> en : iriGraphsMap.entrySet()) {
-            if (en.getValue().contains(at)) {
-                return en.getKey();
-            }
-        }
-        for (Entry<RoBnode, RoaringBitmap> en : bNodeGraphsMap.entrySet()) {
-            if (en.getValue().contains(at)) {
-                return en.getKey();
-            }
-        }
-        return null;
-    }
-
     public Stream<Statement> stream() {
         return StreamSupport.stream(spliterator(), false);
     }
 
     @Override
     public Iterator<Statement> iterator() {
-        return read(bySubject, objectColumn, present, SCAN_BATCH_SIZE);
+        return read(bySubject, objectColumn, graphPrefix(), present, SCAN_BATCH_SIZE);
     }
 
     /**
@@ -322,7 +242,8 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (object != null) {
             filter = and(filter, FilterPredicate.eq(column, object.id()));
         }
-        Iterator<Statement> iterator = read(table, column, filter, LOOKUP_BATCH_SIZE);
+        Iterator<Statement> iterator = read(table, column, useByObject ? "" : graphPrefix(), filter,
+                LOOKUP_BATCH_SIZE);
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
     }
 
@@ -331,14 +252,26 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     }
 
     /**
-     * Reads the subject and object columns of a table, the rows matching the
-     * filter if there is one.
+     * Reads the subject, object and graph columns of a table, the rows
+     * matching the filter if there is one.
+     *
+     * @param graphPrefix the prefix of the graph columns in the table
      */
-    private Iterator<Statement> read(ParquetTable table, String column, FilterPredicate filter, int batchSize) {
+    private Iterator<Statement> read(ParquetTable table, String column, String graphPrefix,
+            FilterPredicate filter, int batchSize) {
+        List<String> projection = new ArrayList<>(List.of(SUBJECT, column));
+        for (String graph : graphColumns) {
+            projection.add(graphPrefix + graph);
+        }
+        String[] columns = projection.toArray(String[]::new);
         Optional<ColumnReaders> batches = filter == null
-                ? table.columns(batchSize, SUBJECT, column)
-                : table.columns(filter, batchSize, SUBJECT, column);
-        return batches.<Iterator<Statement>>map(this::newIterator).orElseGet(Collections::emptyIterator);
+                ? table.columns(batchSize, columns)
+                : table.columns(filter, batchSize, columns);
+        return batches.<Iterator<Statement>>map(readers -> {
+            RoResourceValueListIterator iterator = newIterator(readers);
+            iterator.columns(columns);
+            return iterator;
+        }).orElseGet(Collections::emptyIterator);
     }
 
     /**
@@ -351,8 +284,8 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (object == null) {
             return iterator();
         }
-        return read(bySubject, objectColumn, and(present, FilterPredicate.eq(objectColumn, object.id())),
-                SCAN_BATCH_SIZE);
+        return read(bySubject, objectColumn, graphPrefix(),
+                and(present, FilterPredicate.eq(objectColumn, object.id())), SCAN_BATCH_SIZE);
     }
 
 
@@ -362,8 +295,6 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         protected final File file;
         protected final RoIri predicate;
-        protected final Map<RoIri, RoaringBitmap> iriGraphsMap = new HashMap<>();
-        protected final Map<RoBnode, RoaringBitmap> bnodeGraphsMap = new HashMap<>();
         protected final RoDictionaries dictionaries;
         protected final Hardwood hardwood;
         // Most lists of a predicate stay empty: they only take memory once a
@@ -384,25 +315,6 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             this.triples = new SortedTripleWriter(file, hardwood, false);
         }
 
-        protected RoaringBitmap bitmapForContext(final RoResource context) {
-            if (context instanceof RoIri) {
-                return bitmapForContext((RoIri) context);
-            } else if (context instanceof RoBnode) {
-                return bitmapForContext((RoBnode) context);
-            } else {
-                return null;
-            }
-        }
-
-        private RoaringBitmap bitmapForContext(final RoIri context) {
-            RoaringBitmap filter = iriGraphsMap.get(context);
-            if (filter == null) {
-                filter = new RoaringBitmap();
-                iriGraphsMap.put(context, filter);
-            }
-            return filter;
-        }
-
         public void add(S subject, O object,
                 RoResource context) throws IOException {
             int contextNumber = SortedTripleWriter.NO_CONTEXT;
@@ -416,74 +328,85 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         }
 
         /**
-         * Writes the rows per named graph, if the list has triples in named
-         * graphs; otherwise removes the file an earlier load left.
+         * Writes the copy of the list sorted by object, from the list, with
+         * the same graph columns.
          */
-        protected void saveContextBitmaps() throws IOException {
-            List<Graph> graphs = new ArrayList<>();
-            for (Entry<RoIri, RoaringBitmap> en : iriGraphsMap.entrySet()) {
-                graphs.add(new Graph(true, en.getKey().getLongId(), en.getValue()));
-            }
-            for (Entry<RoBnode, RoaringBitmap> en : bnodeGraphsMap.entrySet()) {
-                graphs.add(new Graph(false, en.getKey().getLongId(), en.getValue()));
-            }
-            writeGraphs(file, graphs);
-        }
-
-        private RoaringBitmap bitmapForContext(final RoBnode context) {
-            RoaringBitmap filter = bnodeGraphsMap.get(context);
-            if (filter == null) {
-                filter = new RoaringBitmap();
-                bnodeGraphsMap.put(context, filter);
-            }
-            return filter;
-        }
-
-        /**
-         * Writes the copy of the list sorted by object, from the list. It
-         * has no contexts: those are read from the list.
-         */
-        private void writeByObject() throws IOException {
+        private void writeByObject(List<String> graphs) throws IOException {
             SortedTripleWriter sorted = new SortedTripleWriter(byObjectFile(file), hardwood, true);
+            List<String> columns = new ArrayList<>(List.of(SUBJECT, OBJECT));
+            columns.addAll(graphs);
+            if (!graphs.isEmpty()) {
+                columns.add(GraphColumns.DEFAULT);
+            }
             try (ParquetTable list = ParquetTable.open(hardwood, file)) {
-                Optional<ColumnReaders> batches = list.columns(SCAN_BATCH_SIZE, SUBJECT, OBJECT);
+                Optional<ColumnReaders> batches = list.columns(SCAN_BATCH_SIZE, columns.toArray(String[]::new));
                 if (batches.isPresent()) {
                     try (ColumnReaders rows = batches.get()) {
                         while (rows.nextBatch()) {
                             long[] subjects = rows.getColumnReader(SUBJECT).getLongs();
                             long[] objects = rows.getColumnReader(OBJECT).getLongs();
+                            boolean[][] inGraph = new boolean[columns.size() - 2][];
+                            for (int g = 0; g < inGraph.length; g++) {
+                                inGraph[g] = rows.getColumnReader(columns.get(g + 2)).getBooleans();
+                            }
                             for (int i = 0; i < subjects.length; i++) {
-                                sorted.add(subjects[i], objects[i], SortedTripleWriter.NO_CONTEXT);
+                                if (inGraph.length == 0) {
+                                    sorted.add(subjects[i], objects[i], SortedTripleWriter.NO_CONTEXT);
+                                }
+                                for (int g = 0; g < inGraph.length; g++) {
+                                    if (inGraph[g][i]) {
+                                        // the default graph is the last column
+                                        sorted.add(subjects[i], objects[i],
+                                                g < graphs.size() ? g : SortedTripleWriter.NO_CONTEXT);
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-            sorted.finish((context, row) -> {
-            });
+            sorted.finish(graphs);
         }
 
         /**
-         * Writes the list sorted by subject and the rows of each context.
+         * Writes the list sorted by subject and its copy sorted by object.
          */
         protected void save() throws IOException {
-            triples.finish((context, row) -> bitmapForContext(contexts.get(context)).add((int) row));
-            writeByObject();
-            saveContextBitmaps();
+            List<String> graphs = contexts.stream().map(GraphColumns::name).toList();
+            triples.finish(graphs);
+            writeByObject(graphs);
         }
     }
 
+    /**
+     * The triples of the rows read, a statement per graph a triple is in.
+     */
     protected abstract class RoResourceValueListIterator
             implements Iterator<Statement>, AutoCloseable {
 
         private final ColumnReaders batches;
         private boolean open = true;
+        private String[] columns;
         private long[] subjects;
         private long[] objects;
+        private boolean[][] inGraph;
         private int next;
+        /**
+         * The graph of the triple at next: the first one it is in at or
+         * after this one.
+         */
+        private int graph;
 
         protected RoResourceValueListIterator(ColumnReaders batches) {
             this.batches = batches;
+        }
+
+        /**
+         * @param columns the columns read: the subject, the object, then the
+         * graph columns of the list in the order of {@link #graphs()}
+         */
+        void columns(String[] columns) {
+            this.columns = columns;
         }
 
         @Override
@@ -493,8 +416,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             }
             S subject = getSubject(subjects[next]);
             O object = getObject(objects[next]);
-            next++;
-            return statement(subject, predicate, object, null);
+            RoResource context = null;
+            if (inGraph.length == 0) {
+                next++;
+            } else {
+                context = graphs.get(graph);
+                graph++;
+            }
+            return statement(subject, predicate, object, context);
         }
 
         public Statement statement(S subject, RoIri predicate, O object, RoResource graph) {
@@ -515,19 +444,34 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         @Override
         public boolean hasNext() {
-            while (open && (subjects == null || next == subjects.length)) {
-                if (batches.nextBatch()) {
-                    // the subject column comes first in every file, the
-                    // object column second, whatever its name
-                    subjects = batches.getColumnReader(0).getLongs();
-                    objects = batches.getColumnReader(1).getLongs();
+            while (open) {
+                if (subjects != null && next < subjects.length) {
+                    if (inGraph.length == 0) {
+                        return true;
+                    }
+                    while (graph < inGraph.length && !inGraph[graph][next]) {
+                        graph++;
+                    }
+                    if (graph < inGraph.length) {
+                        return true;
+                    }
+                    next++;
+                    graph = 0;
+                } else if (batches.nextBatch()) {
+                    subjects = batches.getColumnReader(columns[0]).getLongs();
+                    objects = batches.getColumnReader(columns[1]).getLongs();
+                    inGraph = new boolean[columns.length - 2][];
+                    for (int g = 0; g < inGraph.length; g++) {
+                        inGraph[g] = batches.getColumnReader(columns[g + 2]).getBooleans();
+                    }
                     next = 0;
+                    graph = 0;
                 } else {
                     batches.close();
                     open = false;
                 }
             }
-            return open;
+            return false;
         }
     }
 }

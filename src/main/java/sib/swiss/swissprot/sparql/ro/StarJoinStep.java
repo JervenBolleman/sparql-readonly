@@ -143,10 +143,18 @@ final class StarJoinStep implements QueryEvaluationStep {
         List<QueryBindingSet> rows = List.of(first);
         for (int i = 0; i < patterns.size(); i++) {
             String name = patterns.get(i).objectName();
+            List<QueryBindingSet> next = new ArrayList<>();
             if (name == null) {
+                // a constant object: a row per triple, as there is one per
+                // graph the triple is in
+                for (QueryBindingSet row : rows) {
+                    for (int k = 0; k < objects.get(i).size(); k++) {
+                        next.add(row);
+                    }
+                }
+                rows = next;
                 continue;
             }
-            List<QueryBindingSet> next = new ArrayList<>();
             for (QueryBindingSet row : rows) {
                 for (Value object : objects.get(i)) {
                     Value bound = row.getValue(name);
@@ -294,6 +302,12 @@ final class StarJoinStep implements QueryEvaluationStep {
         private final ColumnReaders batches;
         private long[] subjects = new long[0];
         private long[][] objects;
+        /**
+         * Per pattern, the graph columns of its list, none if its list is
+         * all in the default graph.
+         */
+        private final List<List<String>> graphColumns = new ArrayList<>();
+        private boolean[][][] inGraph;
         private int next = -1;
 
         /**
@@ -309,6 +323,8 @@ final class StarJoinStep implements QueryEvaluationStep {
                 String column = lists.get(i).wideColumn().orElseThrow().column();
                 columns.add(column);
                 projection.add(column);
+                graphColumns.add(lists.get(i).graphColumns());
+                projection.addAll(lists.get(i).graphColumns());
                 FilterPredicate present = objects.get(i) == null
                         ? FilterPredicate.isNotNull(column)
                         : FilterPredicate.eq(column, objects.get(i).id());
@@ -328,8 +344,13 @@ final class StarJoinStep implements QueryEvaluationStep {
                 }
                 subjects = batches.getColumnReader(RoResourceRoValueList.SUBJECT).getLongs();
                 objects = new long[columns.size()][];
+                inGraph = new boolean[columns.size()][][];
                 for (int i = 0; i < columns.size(); i++) {
                     objects[i] = batches.getColumnReader(columns.get(i)).getLongs();
+                    inGraph[i] = new boolean[graphColumns.get(i).size()][];
+                    for (int g = 0; g < inGraph[i].length; g++) {
+                        inGraph[i][g] = batches.getColumnReader(graphColumns.get(i).get(g)).getBooleans();
+                    }
                 }
                 next = 0;
             }
@@ -355,7 +376,20 @@ final class StarJoinStep implements QueryEvaluationStep {
         public List<List<Value>> objects() {
             List<List<Value>> values = new ArrayList<>();
             for (int i = 0; i < lists.size(); i++) {
-                values.add(List.of(lists.get(i).objectOf(objects[i][next])));
+                Value object = lists.get(i).objectOf(objects[i][next]);
+                if (inGraph[i].length == 0) {
+                    values.add(List.of(object));
+                } else {
+                    // the triple once per graph it is in, as a pattern on
+                    // the default graph, the union of all, sees it
+                    List<Value> perGraph = new ArrayList<>();
+                    for (boolean[] in : inGraph[i]) {
+                        if (in[next]) {
+                            perGraph.add(object);
+                        }
+                    }
+                    values.add(perGraph);
+                }
             }
             return values;
         }

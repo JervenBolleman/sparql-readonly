@@ -4,10 +4,8 @@ import static sib.swiss.swissprot.sparql.ro.ByteBuffersBackedByFilesTools.getLon
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Map;
 import dev.hardwood.Hardwood;
 import dev.hardwood.reader.ColumnReaders;
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.Term;
 import static sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList.SUBJECT;
@@ -21,12 +19,9 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLiteral> {
 
-    public IriBooleanList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, hardwood);
-    }
 
     public IriBooleanList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, hardwood);
+        super(file, predicate, dictionaries, hardwood);
     }
 
     @Override
@@ -64,8 +59,7 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
 
         public IriBooleanList build() throws IOException {
             save();
-            return new IriBooleanList(file, predicate, iriGraphsMap, bnodeGraphsMap,
-                    dictionaries, hardwood);
+            return new IriBooleanList(file, predicate, dictionaries, hardwood);
         }
 
     }

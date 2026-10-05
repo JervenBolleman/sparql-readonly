@@ -119,9 +119,9 @@ subject and object kind.
 Each list buffers its triples, up to a million. A full buffer is sorted by
 subject, then object, and written as a run next to the list. Building the
 list merges its runs, 64 at a time, into the list file; a list that never
-filled its buffer is sorted in memory and written once. Exact duplicate
-triples are stored once. The rows of the triples in each named graph are
-recorded in a bitmap per graph.
+filled its buffer is sorted in memory and written once. A triple is stored
+once, with a boolean column per named graph true for the graphs it is in
+(see "Graphs" in [storage.md](storage.md)).
 
 The list is then read back and written again sorted by object, then
 subject, as the list's `-by-object` copy.
@@ -131,8 +131,8 @@ subject, as the list's `-by-object` copy.
 The lists with one object per subject are read for their subjects, grouped by how much their subjects overlap, and each group
 of two or more is written as a wide table in `wideTables/`
 (`WideTables.build`). The lists of a group are then replaced by a pointer
-to their column, and the rows in their `-graphs` files are translated to
-rows of the table. See "Wide tables" in [storage.md](storage.md) for the
+to their column. The graph columns of each list are copied along with its
+objects. See "Wide tables" in [storage.md](storage.md) for the
 grouping and the `wideTableOverlap` setting.
 
 Finally the staging file, the spill directory and all runs are deleted,
@@ -188,7 +188,5 @@ and are counted back in under five minutes in `RoStoreTest`.
 
 ## Limitations
 
-- Named graphs are recorded while loading but not used when reading:
-  statements come back without their context.
 - Loading into a directory that already holds a store is not supported: the
   triple lists of predicates that only the earlier load had would remain.
