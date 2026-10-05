@@ -68,13 +68,19 @@ in that graph.
 
 ### Wide tables
 
-Lists with one object per subject, and no named graphs, whose subjects
-largely overlap are merged into one wide table: a `subject` column and one
+Lists with one object per subject whose subjects largely overlap are
+merged into one wide table: a `subject` column and one
 `INT64` column of objects per list, `p0`, `p1`, …, null where a subject has
 no triple in that list. The subjects, otherwise stored in each of these
 lists, are stored once. A merged list keeps its `-by-object` copy; its file
 sorted by subject is replaced by `<list>-wide`, a line with the table's path
 relative to the predicate directory, a tab, and the column.
+
+Merged lists may be in different named graphs. A merged list keeps its
+`-graphs` file, with its rows translated to rows of the table: the n-th
+triple of the list, sorted by subject, is in the table row of its subject.
+A triple that is in several graphs is stored once per graph, so its subject
+has more than one row and the list is not merged.
 
 Which lists are merged is set by `RoStore.setWideTableOverlap(percent)`, or
 `-Dsparql.ro.wideTableOverlap` for `Loader`, default 90. Lists are taken

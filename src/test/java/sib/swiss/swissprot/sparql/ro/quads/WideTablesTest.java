@@ -10,11 +10,15 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
+import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
@@ -25,8 +29,13 @@ import org.eclipse.rdf4j.sail.SailConnection;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.roaringbitmap.RoaringBitmap;
+
+import dev.hardwood.reader.ColumnReaders;
 
 import sib.swiss.swissprot.sparql.ro.RoStore;
+import sib.swiss.swissprot.sparql.ro.Term;
+import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 /**
  * Which triple lists are merged into wide tables, at which overlap, and that
@@ -59,6 +68,73 @@ public class WideTablesTest {
         check(data, 75, List.of(Set.of("a", "b", "c")));
         check(data, 0, List.of(Set.of("a", "b", "c", "d")));
         check(data, 101, List.of());
+    }
+
+    /**
+     * a: subjects 0..999, the even ones in graph g1, the odd ones in the
+     * default graph; b: 0..949, every third in g2, the others in g1. Both
+     * merge, and the rows of each graph are those of its subjects in the
+     * table.
+     */
+    @Test
+    public void listsInNamedGraphsMerge() throws IOException {
+        IRI g1 = VF.createIRI(EX, "g1");
+        IRI g2 = VF.createIRI(EX, "g2");
+        Map<String, Map<IRI, Set<String>>> expected = new TreeMap<>();
+        List<Statement> statements = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            IRI subject = VF.createIRI(EX + "s/", "s" + i);
+            IRI inA = i % 2 == 0 ? g1 : null;
+            statements.add(VF.createStatement(subject, VF.createIRI(EX, "a"), VF.createLiteral("a" + i), inA));
+            if (inA != null) {
+                expected.computeIfAbsent("a", p -> new HashMap<>())
+                        .computeIfAbsent(inA, g -> new TreeSet<>()).add(subject.stringValue());
+            }
+            if (i < 950) {
+                IRI inB = i % 3 == 0 ? g2 : g1;
+                statements.add(VF.createStatement(subject, VF.createIRI(EX, "b"), VF.createIRI(EX, "o" + (i % 17)), inB));
+                expected.computeIfAbsent("b", p -> new HashMap<>())
+                        .computeIfAbsent(inB, g -> new TreeSet<>()).add(subject.stringValue());
+            }
+        }
+        File file = folder.newFile("graphs.nq");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            RDFWriter writer = Rio.createWriter(RDFFormat.NQUADS, out);
+            writer.startRDF();
+            statements.forEach(writer::handleStatement);
+            writer.endRDF();
+        }
+        File dir = folder.newFolder("store-graphs");
+        RoStore store = new RoStore();
+        store.setDataDir(dir);
+        store.setWideTableOverlap(90);
+        store.init();
+        try {
+            store.load(file);
+            assertEquals(1000 + 950, all(store).size());
+            for (String predicate : List.of("a", "b")) {
+                RoResourceRoValueList<?, ?> list = store.getPredicateStore(VF.createIRI(EX, predicate))
+                        .onlyList(Term.Kind.IRI, null).orElseThrow();
+                assertTrue(predicate + " is merged", list.wideColumn().isPresent());
+                List<Long> tableSubjects = new ArrayList<>();
+                try (ColumnReaders readers = list.bySubject().columns(4096, RoResourceRoValueList.SUBJECT).orElseThrow()) {
+                    while (readers.nextBatch()) {
+                        for (long subject : readers.getColumnReader(0).getLongs()) {
+                            tableSubjects.add(subject);
+                        }
+                    }
+                }
+                Map<IRI, Set<String>> graphs = new HashMap<>();
+                for (Map.Entry<RoIri, RoaringBitmap> graph : list.iriGraphsMap.entrySet()) {
+                    Set<String> subjects = new TreeSet<>();
+                    graph.getValue().forEach((int row) -> subjects.add(list.subjectOf(tableSubjects.get(row)).stringValue()));
+                    graphs.put(VF.createIRI(graph.getKey().stringValue()), subjects);
+                }
+                assertEquals(predicate, expected.get(predicate), graphs);
+            }
+        } finally {
+            store.shutDown();
+        }
     }
 
     private File data() throws IOException {

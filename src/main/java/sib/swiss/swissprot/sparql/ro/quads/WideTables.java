@@ -17,6 +17,7 @@ import dev.hardwood.metadata.PhysicalType;
 import dev.hardwood.metadata.RepetitionType;
 import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.schema.FileSchema;
+import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 
@@ -31,6 +32,12 @@ import sib.swiss.swissprot.sparql.ro.ParquetTable;
  * A merged list keeps its file sorted by object. Its file sorted by subject
  * is replaced by a pointer, {@code <list>-wide}, holding the path of the
  * table relative to the list's directory and the name of its column.
+ *
+ * <p>
+ * The lists may be in different named graphs. A merged list keeps its
+ * {@code -graphs} file, its rows translated to the rows of the table: as
+ * both are sorted by subject, the n-th triple of the list is in the row of
+ * the table with its subject.
  */
 public final class WideTables {
 
@@ -127,6 +134,7 @@ public final class WideTables {
             write(table, group, groupSubjects.get(g), hardwood);
             for (int c = 0; c < group.size(); c++) {
                 File list = group.get(c).list();
+                moveGraphs(list, group.get(c).subjects(), groupSubjects.get(g));
                 String relative = list.getParentFile().toPath().relativize(table.toPath()).toString();
                 Files.writeString(pointerFile(list).toPath(), relative + "\t" + column(c) + "\n",
                         StandardCharsets.UTF_8);
@@ -144,8 +152,38 @@ public final class WideTables {
     }
 
     /**
-     * The lists sorted by subject that have one object per subject and no
-     * named graphs, with their subjects.
+     * Translates the rows of the list in its named graphs, if it has any,
+     * to the rows of the table.
+     *
+     * @param subjects the subjects of the list, sorted
+     * @param tableSubjects the subjects of the table, sorted, a superset
+     */
+    private static void moveGraphs(File list, long[] subjects, long[] tableSubjects) throws IOException {
+        List<RoResourceRoValueList.Graph> graphs = RoResourceRoValueList.readGraphs(list);
+        if (graphs.isEmpty()) {
+            return;
+        }
+        int[] tableRows = new int[subjects.length];
+        int t = 0;
+        for (int r = 0; r < subjects.length; r++) {
+            while (tableSubjects[t] != subjects[r]) {
+                t++;
+            }
+            tableRows[r] = t;
+        }
+        List<RoResourceRoValueList.Graph> moved = new ArrayList<>();
+        for (RoResourceRoValueList.Graph graph : graphs) {
+            RoaringBitmap rows = new RoaringBitmap();
+            graph.rows().forEach((int row) -> rows.add(tableRows[row]));
+            rows.runOptimize();
+            moved.add(new RoResourceRoValueList.Graph(graph.iri(), graph.id(), rows));
+        }
+        RoResourceRoValueList.writeGraphs(list, moved);
+    }
+
+    /**
+     * The lists sorted by subject that have one object per subject, with
+     * their subjects.
      */
     private static List<Candidate> candidates(File predicateLists, Hardwood hardwood) throws IOException {
         List<Candidate> candidates = new ArrayList<>();
@@ -162,7 +200,7 @@ public final class WideTables {
             }
             Arrays.sort(lists);
             for (File list : lists) {
-                if (RoResourceRoValueList.graphsFile(list).exists() || pointerFile(list).exists()) {
+                if (pointerFile(list).exists()) {
                     continue;
                 }
                 long[] subjects = distinctSubjects(list, hardwood);

@@ -128,11 +128,11 @@ subject, as the list's `-by-object` copy.
 
 ### 5. Wide tables
 
-The lists with one object per subject and no named graphs are read for
-their subjects, grouped by how much their subjects overlap, and each group
+The lists with one object per subject are read for their subjects, grouped by how much their subjects overlap, and each group
 of two or more is written as a wide table in `wideTables/`
 (`WideTables.build`). The lists of a group are then replaced by a pointer
-to their column. See "Wide tables" in [storage.md](storage.md) for the
+to their column, and the rows in their `-graphs` files are translated to
+rows of the table. See "Wide tables" in [storage.md](storage.md) for the
 grouping and the `wideTableOverlap` setting.
 
 Finally the staging file, the spill directory and all runs are deleted,
