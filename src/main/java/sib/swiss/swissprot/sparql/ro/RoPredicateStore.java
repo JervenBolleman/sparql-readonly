@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import dev.hardwood.Hardwood;
@@ -25,6 +26,7 @@ import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.vocabulary.XSD;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBigIntegerList;
+import sib.swiss.swissprot.sparql.ro.quads.GraphColumns;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBnodeList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeBooleanList;
 import sib.swiss.swissprot.sparql.ro.quads.BnodeIntegerList;
@@ -204,7 +206,15 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
      * @param filter leaves out the triples whose object a FILTER rejects
      */
     public Stream<Statement> stream(Resource subject, Value object, PushedFilter filter) {
-        if (subject == null && object == null && filter == PushedFilter.NONE) {
+        return stream(subject, object, filter, null);
+    }
+
+    /**
+     * @param graphs the graph columns of the graphs to read, see
+     * {@link GraphColumns#name(Term)}; null for all
+     */
+    public Stream<Statement> stream(Resource subject, Value object, PushedFilter filter, Set<String> graphs) {
+        if (subject == null && object == null && filter == PushedFilter.NONE && graphs == null) {
             return stream();
         }
         final Term s;
@@ -232,7 +242,7 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
                 .filter(list -> o == null || list.objectKind() == o.kind())
                 .flatMap(list -> {
                     PushedFilter.ListRead read = filter.forObjects(list.objectKind());
-                    return read.read() ? list.stream(s, o, read.objects()) : Stream.empty();
+                    return read.read() ? list.stream(s, o, read.objects(), graphs) : Stream.empty();
                 });
     }
 

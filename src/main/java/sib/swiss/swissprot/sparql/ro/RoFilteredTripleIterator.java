@@ -1,9 +1,8 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.Objects;
-import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -12,6 +11,8 @@ import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
+
+import sib.swiss.swissprot.sparql.ro.quads.GraphColumns;
 
 public class RoFilteredTripleIterator implements
         CloseableIteration<Statement> {
@@ -41,13 +42,30 @@ public class RoFilteredTripleIterator implements
         } else {
             stores = store.getPredicateStores().values().stream();
         }
-        // the subject and object are selected by Parquet in the triple lists
-        Stream<Statement> stream = stores.flatMap(p -> p.stream(subj, obj, filter));
-        if (contexts != null && contexts.length > 0) {
-            List<Resource> inContexts = Arrays.asList(contexts);
-            stream = stream.filter(s -> inContexts.stream().anyMatch(c -> Objects.equals(c, s.getContext())));
-        }
+        // the subject, object and graphs are selected by Parquet in the
+        // triple lists
+        Set<String> graphs = graphColumns(store, contexts);
+        Stream<Statement> stream = stores.flatMap(p -> p.stream(subj, obj, filter, graphs));
         predicateStores = stream.iterator();
+    }
+
+    /**
+     * @return the graph columns of the contexts, null for all graphs
+     */
+    private static Set<String> graphColumns(RoStore store, Resource[] contexts) {
+        if (contexts == null || contexts.length == 0) {
+            return null;
+        }
+        Set<String> graphs = new HashSet<>();
+        for (Resource context : contexts) {
+            if (context == null) {
+                graphs.add(GraphColumns.name((Term) null));
+            } else {
+                // a graph that is not stored has no triples
+                Term.of(context, store.dictionaries()).ifPresent(graph -> graphs.add(GraphColumns.name(graph)));
+            }
+        }
+        return graphs;
     }
 
     @Override

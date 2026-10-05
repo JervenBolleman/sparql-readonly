@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
+import sib.swiss.swissprot.sparql.ro.Term;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -46,6 +47,17 @@ public final class GraphColumns {
         } else {
             return BNODE + graph.getLongId();
         }
+    }
+
+    /**
+     * @param graph the graph as stored, null for the default graph
+     * @return the name of the column of the graph
+     */
+    public static String name(Term graph) {
+        if (graph == null) {
+            return DEFAULT;
+        }
+        return (graph.kind() == Term.Kind.IRI ? IRI : BNODE) + graph.id();
     }
 
     /**

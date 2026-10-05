@@ -161,15 +161,15 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    pattern["?s p ?o with what is bound<br/>and FILTERs on ?o"] --> resolve["resolve bound values once<br/>to kind and id (Term)"]
+    pattern["?s p ?o with what is bound,<br/>FILTERs on ?o and the graphs"] --> resolve["resolve bound values once<br/>to kind and id (Term)"]
     resolve -->|"not in the store"| empty["no statements"]
     resolve --> select["predicate directories:<br/>the one of p, or all"]
-    select --> kinds["lists whose subject and object kind<br/>match the bound values,<br/>and that a pushed FILTER can match"]
+    select --> kinds["lists whose subject and object kind<br/>match the bound values,<br/>that a pushed FILTER can match,<br/>and that have triples in the graphs"]
     kinds --> which{"what is bound?"}
     which -->|"the subject"| so["#lt;list#gt;<br/>filter on subject (and object)"]
     which -->|"only the object,<br/>or a FILTER on it"| os["#lt;list#gt;-by-object<br/>filter on object"]
     which -->|nothing| scan["#lt;list#gt;, all rows"]
-    so --> rows["rows of ids → Ro values,<br/>decoded from the dictionaries<br/>when they are used"]
+    so --> rows["rows of ids → Ro values,<br/>a statement per graph,<br/>decoded from the dictionaries<br/>when they are used"]
     os --> rows
     scan --> rows
 ```
@@ -180,6 +180,18 @@ compares the object with a number, or with a boolean, is pushed down as a
 range or set on the object column of the lists where values are stored as
 themselves, and rules out lists that can not match; the FILTER itself is
 still applied to what is read.
+
+Asked for some graphs, as by `GRAPH <g> { … }`, `FROM` or `getStatements`
+with contexts, a list reads only the graph columns of those graphs, and
+only the rows where one of them is true. A list without graph columns is
+read only for the default graph.
+
+Literals, and the local names of IRIs in namespaces of names, are decoded
+4096 ids at a time, a row group, along with their datatype and language,
+and the last blocks read are kept: 32 of literals, 64 of local names. The
+values of a list are mostly read along with others of nearby ids, so this
+replaces a filtered read per value, and a literal keeps its label once read.
+On the star join tests this took reading the answers from 32 to 5 s.
 
 On the taxonomy store: one subject and predicate, 6 ms; one object and
 predicate (3 statements), 5 ms; all statements of one subject, 68 ms.
@@ -267,6 +279,6 @@ What is still duplicated:
 
 ## Limitations
 
-- A pattern on named graphs, `GRAPH <g> { … }` or `getStatements` with
-  contexts, reads all graphs of the list and drops the others afterwards:
-  the graph columns are not yet a Parquet filter.
+- Finding the id of a value, as for a constant in a query, is still one
+  filtered read per value: loading 200 000 IRIs and looking each up by
+  name takes about 100 s in `RoIriDictionaryTest`.

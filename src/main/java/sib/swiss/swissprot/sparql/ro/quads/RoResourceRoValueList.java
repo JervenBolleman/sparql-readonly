@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.function.Function;
@@ -193,9 +194,44 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return StreamSupport.stream(spliterator(), false);
     }
 
+    /**
+     * @param graphs the graph columns, see {@link GraphColumns}, of the
+     * graphs to read the triples of; null for all
+     * @return the indexes in {@link #graphs()} of the graph columns to read,
+     * null if the list has none and is read whole, empty if no triple can be
+     * in these graphs
+     */
+    private List<Integer> selected(Set<String> graphs) {
+        if (graphColumns.isEmpty()) {
+            // all in the default graph
+            return graphs == null || graphs.contains(GraphColumns.DEFAULT) ? null : List.of();
+        }
+        List<Integer> selected = new ArrayList<>();
+        for (int g = 0; g < graphColumns.size(); g++) {
+            if (graphs == null || graphs.contains(graphColumns.get(g))) {
+                selected.add(g);
+            }
+        }
+        return selected;
+    }
+
+    /**
+     * @return the rows in one of the selected graphs, null if all rows are
+     */
+    private FilterPredicate inGraphs(List<Integer> selected, String prefix) {
+        if (selected == null || selected.size() == graphColumns.size()) {
+            return null;
+        }
+        FilterPredicate[] any = new FilterPredicate[selected.size()];
+        for (int i = 0; i < any.length; i++) {
+            any[i] = FilterPredicate.eq(prefix + graphColumns.get(selected.get(i)), true);
+        }
+        return any.length == 1 ? any[0] : FilterPredicate.or(any);
+    }
+
     @Override
     public Iterator<Statement> iterator() {
-        return read(bySubject, objectColumn, graphPrefix(), present, SCAN_BATCH_SIZE);
+        return read(bySubject, objectColumn, graphPrefix(), present, SCAN_BATCH_SIZE, null);
     }
 
     /**
@@ -225,7 +261,21 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
      * name, null for none
      */
     public Stream<Statement> stream(Term subject, Term object, Function<String, FilterPredicate> objects) {
-        if (subject == null && object == null && objects == null) {
+        return stream(subject, object, objects, null);
+    }
+
+    /**
+     * @param graphs the graph columns, see {@link GraphColumns}, of the
+     * graphs to read the triples of, null for all: only the triples in these
+     * graphs are read, each once per selected graph it is in
+     */
+    public Stream<Statement> stream(Term subject, Term object, Function<String, FilterPredicate> objects,
+            Set<String> graphs) {
+        List<Integer> selected = selected(graphs);
+        if (selected != null && selected.isEmpty()) {
+            return Stream.empty();
+        }
+        if (subject == null && object == null && objects == null && graphs == null) {
             return stream();
         }
         // sorted on the column that is filtered, so that statistics skip
@@ -242,8 +292,10 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (object != null) {
             filter = and(filter, FilterPredicate.eq(column, object.id()));
         }
-        Iterator<Statement> iterator = read(table, column, useByObject ? "" : graphPrefix(), filter,
-                LOOKUP_BATCH_SIZE);
+        String prefix = useByObject ? "" : graphPrefix();
+        filter = and(filter, inGraphs(selected, prefix));
+        Iterator<Statement> iterator = read(table, column, prefix, filter,
+                subject == null && object == null ? SCAN_BATCH_SIZE : LOOKUP_BATCH_SIZE, selected);
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
     }
 
@@ -258,10 +310,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
      * @param graphPrefix the prefix of the graph columns in the table
      */
     private Iterator<Statement> read(ParquetTable table, String column, String graphPrefix,
-            FilterPredicate filter, int batchSize) {
+            FilterPredicate filter, int batchSize, List<Integer> selected) {
         List<String> projection = new ArrayList<>(List.of(SUBJECT, column));
-        for (String graph : graphColumns) {
-            projection.add(graphPrefix + graph);
+        List<RoResource> contexts = new ArrayList<>();
+        for (int g = 0; g < graphColumns.size(); g++) {
+            if (selected == null || selected.contains(g)) {
+                projection.add(graphPrefix + graphColumns.get(g));
+                contexts.add(graphs.get(g));
+            }
         }
         String[] columns = projection.toArray(String[]::new);
         Optional<ColumnReaders> batches = filter == null
@@ -269,7 +325,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
                 : table.columns(filter, batchSize, columns);
         return batches.<Iterator<Statement>>map(readers -> {
             RoResourceValueListIterator iterator = newIterator(readers);
-            iterator.columns(columns);
+            iterator.columns(columns, contexts);
             return iterator;
         }).orElseGet(Collections::emptyIterator);
     }
@@ -285,7 +341,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             return iterator();
         }
         return read(bySubject, objectColumn, graphPrefix(),
-                and(present, FilterPredicate.eq(objectColumn, object.id())), SCAN_BATCH_SIZE);
+                and(present, FilterPredicate.eq(objectColumn, object.id())), SCAN_BATCH_SIZE, null);
     }
 
 
@@ -387,6 +443,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         private final ColumnReaders batches;
         private boolean open = true;
         private String[] columns;
+        private List<RoResource> contexts;
         private long[] subjects;
         private long[] objects;
         private boolean[][] inGraph;
@@ -402,11 +459,13 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         }
 
         /**
-         * @param columns the columns read: the subject, the object, then the
-         * graph columns of the list in the order of {@link #graphs()}
+         * @param columns the columns read: the subject, the object, then
+         * graph columns of the list
+         * @param contexts the graph of each of those graph columns
          */
-        void columns(String[] columns) {
+        void columns(String[] columns, List<RoResource> contexts) {
             this.columns = columns;
+            this.contexts = contexts;
         }
 
         @Override
@@ -420,7 +479,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             if (inGraph.length == 0) {
                 next++;
             } else {
-                context = graphs.get(graph);
+                context = contexts.get(graph);
                 graph++;
             }
             return statement(subject, predicate, object, context);

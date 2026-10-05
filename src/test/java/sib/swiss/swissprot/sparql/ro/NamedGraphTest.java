@@ -98,6 +98,8 @@ public class NamedGraphTest {
                 statements.add(VF.createStatement(s, iri("rank"), rank));
             }
             statements.add(VF.createStatement(s, iri("count"), VF.createLiteral(i % 10), i % 7 == 0 ? bnodeGraph : G1));
+            // only in the default graph: a list without graph columns
+            statements.add(VF.createStatement(s, iri("plain"), VF.createLiteral("p" + (i % 13))));
             if (i % 11 == 0) {
                 statements.add(VF.createStatement(s, iri("alias"), VF.createLiteral("a" + i), G2));
                 statements.add(VF.createStatement(s, iri("alias"), VF.createLiteral("b" + i)));
@@ -157,6 +159,8 @@ public class NamedGraphTest {
             {G1, G2},
             {(Resource) null},
             {null, G2},
+            {iri("notAGraph")},
+            {G1, iri("notAGraph")},
         };
         // every predicate in every graph, then a single predicate per set of
         // graphs: reading all statements as text is slow
@@ -164,9 +168,10 @@ public class NamedGraphTest {
         assertTrue(expected.size() > 6000);
         assertEquals(expected, statements(ro, null, new Resource[0]));
         for (Resource[] in : contexts) {
-            IRI predicate = iri("rank");
-            assertEquals(predicate + " in " + java.util.Arrays.toString(in), statements(reference, predicate, in),
-                    statements(ro, predicate, in));
+            for (IRI predicate : new IRI[]{iri("rank"), iri("plain")}) {
+                assertEquals(predicate + " in " + java.util.Arrays.toString(in), statements(reference, predicate, in),
+                        statements(ro, predicate, in));
+            }
         }
     }
 
@@ -185,6 +190,9 @@ public class NamedGraphTest {
             "SELECT * FROM :g2 WHERE { ?s :rank ?r ; :alias ?a }",
             "SELECT * FROM NAMED :g1 WHERE { GRAPH ?g { ?s :name ?n } }",
             "SELECT ?g (COUNT(*) AS ?c) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g",
+            "SELECT (COUNT(*) AS ?c) WHERE { GRAPH :g1 { ?s ?p ?o } }",
+            "SELECT * WHERE { GRAPH :g2 { ?s :rank :Species } }",
+            "SELECT * FROM :g1 FROM :g2 WHERE { ?s :rank ?r ; :plain ?p }",
         };
         for (String query : queries) {
             assertEquals(query, answers(reference, query), answers(ro, query));
