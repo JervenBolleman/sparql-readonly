@@ -4,7 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
@@ -24,13 +24,13 @@ public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
     }
 
     @Override
-    protected RoBnode getSubject(RowReader row) {
-        return new RoBnode(row.getLong(SUBJECT));
+    protected RoBnode getSubject(long id) {
+        return new RoBnode(id);
     }
 
     @Override
-    protected RoIri getObject(RowReader row) {
-        return new RoIri(row.getLong(OBJECT), dictionaries.getIriDict());
+    protected RoIri getObject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     public static class Builder extends AbstractBuilder<RoBnode, RoIri> {
@@ -48,7 +48,7 @@ public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
 
     private class BnodeIriListIterator extends RoResourceValueListIterator {
 
-        private BnodeIriListIterator(RowReader rows) {
+        private BnodeIriListIterator(ColumnReaders rows) {
             super(rows);
         }
     }
@@ -64,7 +64,7 @@ public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new BnodeIriListIterator(rows);
     }
 

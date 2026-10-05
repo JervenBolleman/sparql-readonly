@@ -303,7 +303,9 @@ public class RoStoreTest {
         RoStore store = fact.getSail(config);
         store.init();
         store.load(new File("test_data", "taxonomy.rdf"), new File("test_data", "taxonomy-hierarchy.rdf"));
-        // 16 555 403 in taxonomy.rdf, 39 317 130 in taxonomy-hierarchy.rdf
-        assertEquals(55_872_533, store.getConnection().size());
+        // 16 555 403 in taxonomy.rdf, 39 317 130 in taxonomy-hierarchy.rdf,
+        // which repeats 2 402 179 of the direct subClassOf of taxonomy.rdf in
+        // its transitive closure: the store holds each triple once
+        assertEquals(53_470_354, store.getConnection().size());
     }
 }

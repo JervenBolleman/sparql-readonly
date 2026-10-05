@@ -6,7 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
 import sib.swiss.swissprot.sparql.ro.Term;
@@ -30,13 +30,13 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
     }
 
     @Override
-    protected RoIri getSubject(RowReader row) {
-        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
+    protected RoIri getSubject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     @Override
-    protected RoBooleanLiteral getObject(RowReader row) {
-        return new RoBooleanLiteral(row.getLong(OBJECT) == 1L);
+    protected RoBooleanLiteral getObject(long id) {
+        return new RoBooleanLiteral(id == 1L);
     }
 
     @Override
@@ -50,7 +50,7 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new IriBooleanListIterator(rows);
     }
 
@@ -72,7 +72,7 @@ public class IriBooleanList extends RoResourceRoValueList<RoIri, RoBooleanLitera
 
     private class IriBooleanListIterator extends RoResourceValueListIterator {
 
-        private IriBooleanListIterator(RowReader rows) {
+        private IriBooleanListIterator(ColumnReaders rows) {
             super(rows);
         }
     }

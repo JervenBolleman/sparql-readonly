@@ -10,9 +10,10 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.HashMap;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
@@ -25,7 +26,7 @@ import dev.hardwood.Hardwood;
 import dev.hardwood.metadata.PhysicalType;
 import dev.hardwood.metadata.RepetitionType;
 import dev.hardwood.reader.FilterPredicate;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
@@ -42,6 +43,13 @@ import sib.swiss.swissprot.sparql.ro.values.RoResource;
 import sib.swiss.swissprot.sparql.ro.values.RoValue;
 
 public abstract class RoResourceRoValueList<S extends RoResource, O extends RoValue> implements Iterable<Statement>, Closeable {
+
+    /**
+     * Rows read at a time: many when reading a whole list, few when looking up
+     * a subject or object, which a sorted list keeps in one row group.
+     */
+    private static final int SCAN_BATCH_SIZE = 64 * 1024;
+    private static final int LOOKUP_BATCH_SIZE = 4096;
 
     protected static final String SUBJECT = "subject";
     protected static final String OBJECT = "object";
@@ -63,9 +71,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return triples.numberOfRows();
     }
 
-    protected abstract S getSubject(RowReader row);
+    protected abstract S getSubject(long id);
 
-    protected abstract O getObject(RowReader row);
+    protected abstract O getObject(long id);
 
     protected RoResourceRoValueList(File file, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
@@ -177,7 +185,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
     @Override
     public Iterator<Statement> iterator() {
-        return triples.rows()
+        return triples.columns(SCAN_BATCH_SIZE, SUBJECT, OBJECT)
                 .<Iterator<Statement>>map(this::newIterator)
                 .orElseGet(Collections::emptyIterator);
     }
@@ -212,13 +220,13 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (filter == null) {
             return stream();
         }
-        Iterator<Statement> iterator = triples.rows(filter)
+        Iterator<Statement> iterator = triples.columns(filter, LOOKUP_BATCH_SIZE, SUBJECT, OBJECT)
                 .<Iterator<Statement>>map(this::newIterator)
                 .orElseGet(Collections::emptyIterator);
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
     }
 
-    protected abstract RoResourceValueListIterator newIterator(RowReader rows);
+    protected abstract RoResourceValueListIterator newIterator(ColumnReaders rows);
 
     protected static abstract class AbstractBuilder<S extends RoResource, O extends RoValue> {
 
@@ -226,16 +234,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         protected final RoIri predicate;
         protected final Map<RoIri, RoaringBitmap> iriGraphsMap = new HashMap<>();
         protected final Map<RoBnode, RoaringBitmap> bnodeGraphsMap = new HashMap<>();
-        private static final int BATCH_SIZE = 64 * 1024;
-        // Most lists of a predicate stay empty: their writer and batch only
-        // take memory once a triple arrives, and an empty list has no file.
-        private ParquetTable.Writer writer;
-        protected long numberOfTriplesInList;
         protected final RoDictionaries dictionaries;
         protected final Hardwood hardwood;
-        private long[] subjects;
-        private long[] objects;
-        private int inBatch;
+        // Most lists of a predicate stay empty: they only take memory once a
+        // triple arrives, and an empty list has no file.
+        private final SortedTripleWriter triples;
+        // the contexts of the triples, numbered in the order they are seen
+        private final List<RoResource> contexts = new ArrayList<>();
+        private final Map<RoResource, Integer> contextNumbers = new HashMap<>();
 
         protected AbstractBuilder(File file, RoIri predicate,
                 RoDictionaries dictionaries, Hardwood hardwood)
@@ -245,6 +251,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             this.predicate = predicate;
             this.dictionaries = dictionaries;
             this.hardwood = hardwood;
+            this.triples = new SortedTripleWriter(file, hardwood);
         }
 
         protected RoaringBitmap bitmapForContext(final RoResource context) {
@@ -268,21 +275,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         public void add(S subject, O object,
                 RoResource context) throws IOException {
-            if (subjects == null) {
-                subjects = new long[BATCH_SIZE];
-                objects = new long[BATCH_SIZE];
-            } else if (inBatch == BATCH_SIZE) {
-                flush();
+            int contextNumber = SortedTripleWriter.NO_CONTEXT;
+            if (context != null) {
+                contextNumber = contextNumbers.computeIfAbsent(context, c -> {
+                    contexts.add(c);
+                    return contexts.size() - 1;
+                });
             }
-            numberOfTriplesInList++;
-            subjects[inBatch] = subject.getLongId();
-            objects[inBatch] = object.getLongId();
-            inBatch++;
-            final RoaringBitmap bitmapForContext = bitmapForContext(context);
-            if (bitmapForContext != null) {
-                bitmapForContext.add((int) numberOfTriplesInList);
-            }
-            //else it is in the default context
+            triples.add(subject.getLongId(), object.getLongId(), contextNumber);
         }
 
         protected void saveNamespace(RoNamespaces namespaces, File file) throws IOException {
@@ -335,29 +335,11 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             return filter;
         }
 
-        private void flush() throws IOException {
-            if (inBatch == 0) {
-                return;
-            }
-            if (writer == null) {
-                writer = new ParquetTable.Writer(file, SCHEMA, ParquetTable.LIST_CONFIG);
-            }
-            final long[] s = Arrays.copyOf(subjects, inBatch);
-            final long[] o = Arrays.copyOf(objects, inBatch);
-            writer.writeBatch(b -> b.longs(SUBJECT, s).longs(OBJECT, o));
-            inBatch = 0;
-        }
-
+        /**
+         * Writes the list sorted by subject and the rows of each context.
+         */
         protected void save() throws IOException {
-            flush();
-            if (writer != null) {
-                writer.close();
-            } else if (file.exists() && !file.delete()) {
-                // an empty list has no file, not one of an earlier load
-                throw new IOException("Could not delete " + file);
-            }
-            subjects = null;
-            objects = null;
+            triples.finish((context, row) -> bitmapForContext(contexts.get(context)).add((int) row));
             saveContextBitmaps();
             saveNamespace(dictionaries.getIriDict().getNamespaces(), file);
         }
@@ -366,11 +348,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     protected abstract class RoResourceValueListIterator
             implements Iterator<Statement> {
 
-        private final RowReader rows;
+        private final ColumnReaders batches;
         private boolean open = true;
+        private long[] subjects;
+        private long[] objects;
+        private int next;
 
-        protected RoResourceValueListIterator(RowReader rows) {
-            this.rows = rows;
+        protected RoResourceValueListIterator(ColumnReaders batches) {
+            this.batches = batches;
         }
 
         @Override
@@ -378,9 +363,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             if (!hasNext()) {
                 throw new NoSuchElementException();
             }
-            rows.next();
-            S subject = getSubject(rows);
-            O object = getObject(rows);
+            S subject = getSubject(subjects[next]);
+            O object = getObject(objects[next]);
+            next++;
             return statement(subject, predicate, object, null);
         }
 
@@ -391,9 +376,15 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
         @Override
         public boolean hasNext() {
-            if (open && !rows.hasNext()) {
-                rows.close();
-                open = false;
+            while (open && (subjects == null || next == subjects.length)) {
+                if (batches.nextBatch()) {
+                    subjects = batches.getColumnReader(SUBJECT).getLongs();
+                    objects = batches.getColumnReader(OBJECT).getLongs();
+                    next = 0;
+                } else {
+                    batches.close();
+                    open = false;
+                }
             }
             return open;
         }

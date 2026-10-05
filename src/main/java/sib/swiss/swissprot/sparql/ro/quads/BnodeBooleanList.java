@@ -6,7 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.Statement;
@@ -32,13 +32,13 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
     }
 
     @Override
-    protected RoBnode getSubject(RowReader row) {
-        return new RoBnode(row.getLong(SUBJECT));
+    protected RoBnode getSubject(long id) {
+        return new RoBnode(id);
     }
 
     @Override
-    protected RoBooleanLiteral getObject(RowReader row) {
-        return new RoBooleanLiteral(row.getLong(OBJECT) == 1L);
+    protected RoBooleanLiteral getObject(long id) {
+        return new RoBooleanLiteral(id == 1L);
     }
 
     @Override
@@ -52,7 +52,7 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new BnodeBooleanListIterator(rows);
     }
 
@@ -73,7 +73,7 @@ public class BnodeBooleanList extends RoResourceRoValueList<RoBnode, RoBooleanLi
 
     private class BnodeBooleanListIterator extends RoResourceValueListIterator {
 
-        private BnodeBooleanListIterator(RowReader rows) {
+        private BnodeBooleanListIterator(ColumnReaders rows) {
             super(rows);
         }
 

@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
@@ -32,14 +32,14 @@ public class IriBigIntegerList extends RoResourceRoValueList<RoIri, RoBigInteger
     }
 
     @Override
-    protected RoIri getSubject(RowReader row) {
-        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
+    protected RoIri getSubject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     @Override
-    protected RoBigIntegerLiteral getObject(RowReader row) {
+    protected RoBigIntegerLiteral getObject(long id) {
         try {
-            return dictionaries.getIntDict().getFromId(row.getLong(OBJECT));
+            return dictionaries.getIntDict().getFromId(id);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -56,7 +56,7 @@ public class IriBigIntegerList extends RoResourceRoValueList<RoIri, RoBigInteger
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new IriBigIntegerListIterator(rows);
     }
 
@@ -74,7 +74,7 @@ public class IriBigIntegerList extends RoResourceRoValueList<RoIri, RoBigInteger
 
     private class IriBigIntegerListIterator extends RoResourceValueListIterator {
 
-        private IriBigIntegerListIterator(RowReader rows) {
+        private IriBigIntegerListIterator(ColumnReaders rows) {
             super(rows);
         }
     }

@@ -4,7 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 
 import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
@@ -28,13 +28,13 @@ public class BnodeStringLiteralList extends RoResourceRoValueList<RoBnode, RoStr
     }
 
     @Override
-    protected RoBnode getSubject(RowReader row) {
-        return new RoBnode(row.getLong(SUBJECT));
+    protected RoBnode getSubject(long id) {
+        return new RoBnode(id);
     }
 
     @Override
-    protected RoStringLiteral getObject(RowReader row) {
-        return new RoStringLiteral(row.getLong(OBJECT), dictionaries.getLiteralDict());
+    protected RoStringLiteral getObject(long id) {
+        return new RoStringLiteral(id, dictionaries.getLiteralDict());
     }
 
     @Override
@@ -48,7 +48,7 @@ public class BnodeStringLiteralList extends RoResourceRoValueList<RoBnode, RoStr
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new BnodeStringListIterator(rows);
     }
 
@@ -69,7 +69,7 @@ public class BnodeStringLiteralList extends RoResourceRoValueList<RoBnode, RoStr
     private class BnodeStringListIterator
             extends RoResourceValueListIterator {
 
-        private BnodeStringListIterator(RowReader rows) {
+        private BnodeStringListIterator(ColumnReaders rows) {
             super(rows);
         }
 

@@ -49,6 +49,7 @@ public final class ParquetTable implements Closeable {
      */
     public static final WriterConfig LIST_CONFIG = WriterConfig.builder()
             .rowGroupBufferTargetBytes(4L << 20)
+            .rowGroupTargetRows(64 * 1024)
             .build();
 
     private final ParquetFileReader reader;
@@ -107,6 +108,21 @@ public final class ParquetTable implements Closeable {
             return Optional.empty();
         }
         return Optional.of(reader.buildColumnReaders(ColumnProjection.columns(columns))
+                .batchSize(batchSize)
+                .build());
+    }
+
+    /**
+     * @return readers over the rows matching the filter exactly, in batches
+     * of at most {@code batchSize} rows, which the caller must close. Empty if
+     * this table has no rows.
+     */
+    public Optional<ColumnReaders> columns(FilterPredicate filter, int batchSize, String... columns) {
+        if (isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(reader.buildColumnReaders(ColumnProjection.columns(columns))
+                .filter(filter)
                 .batchSize(batchSize)
                 .build());
     }

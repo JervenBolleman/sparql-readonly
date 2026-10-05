@@ -4,7 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import dev.hardwood.Hardwood;
-import dev.hardwood.reader.RowReader;
+import dev.hardwood.reader.ColumnReaders;
 
 import org.eclipse.rdf4j.model.Statement;
 import org.roaringbitmap.RoaringBitmap;
@@ -37,18 +37,18 @@ public class IriIriList extends RoResourceRoValueList<RoIri, RoIri> {
     }
 
     @Override
-    protected RoResourceValueListIterator newIterator(RowReader rows) {
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
         return new IriIriListIterator(rows);
     }
 
     @Override
-    protected RoIri getSubject(RowReader row) {
-        return new RoIri(row.getLong(SUBJECT), dictionaries.getIriDict());
+    protected RoIri getSubject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     @Override
-    protected RoIri getObject(RowReader row) {
-        return new RoIri(row.getLong(OBJECT), dictionaries.getIriDict());
+    protected RoIri getObject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     public static class Builder extends AbstractBuilder<RoIri, RoIri> {
@@ -68,7 +68,7 @@ public class IriIriList extends RoResourceRoValueList<RoIri, RoIri> {
 
     private class IriIriListIterator extends RoResourceValueListIterator {
 
-        private IriIriListIterator(RowReader rows) {
+        private IriIriListIterator(ColumnReaders rows) {
             super(rows);
         }
 
