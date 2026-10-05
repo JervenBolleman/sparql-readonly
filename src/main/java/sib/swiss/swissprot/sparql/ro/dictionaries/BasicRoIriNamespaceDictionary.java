@@ -1,6 +1,5 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
-import java.io.IOException;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -12,30 +11,41 @@ import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
-public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
-		implements RoIriNamespaceDictionary {
+/**
+ * The local names of one namespace, as rows of the IRI file all such
+ * namespaces share: namespace id, local id, local name, sorted by namespace,
+ * then name. The local id is the row of the name within its namespace.
+ */
+public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 
 	private static final int BITS_IN_A_LONG = Long.BYTES * 8;
 
+	private final ParquetTable iris;
 	private final RoNamespace roNamespace;
 	private final RoIriDictionary roIriDictionary;
 
-	public BasicRoIriNamespaceDictionary(ParquetTable table, RoNamespace roNamespace,
+	/**
+	 * @param iris the shared IRI file, closed by the RoIriDictionary
+	 */
+	public BasicRoIriNamespaceDictionary(ParquetTable iris, RoNamespace roNamespace,
 			RoIriDictionary roIriDictionary) {
-		super(table, RoIriDictionary.IRI_VALUE);
+		this.iris = iris;
 		this.roNamespace = roNamespace;
 		this.roIriDictionary = roIriDictionary;
 	}
 
+	private FilterPredicate inNamespace() {
+		return FilterPredicate.eq(RoIriDictionary.NAMESPACE, roNamespace.getId());
+	}
+
 	@Override
-	public Optional<String> getLocalNameFromId(long id) throws IOException {
-		if ((id >>> (BITS_IN_A_LONG
-				- RoNamespaces.BITS_FOR_NAMESPACES)) == roNamespace.getId()) {
-			final int idWithoutNamespaceId = (int) id;
-			return Optional.of(readStringAt(idWithoutNamespaceId));
-		} else {
+	public Optional<String> getLocalNameFromId(long id) {
+		if ((id >>> (BITS_IN_A_LONG - RoNamespaces.BITS_FOR_NAMESPACES)) != roNamespace.getId()) {
 			return Optional.empty();
 		}
+		long local = id & 0xFFFF_FFFFL;
+		return iris.first(FilterPredicate.and(inNamespace(), FilterPredicate.eq(RoDictionary.ID, local)),
+				c -> c.getColumnReader(RoIriDictionary.IRI_VALUE).getStrings()[0], RoIriDictionary.IRI_VALUE);
 	}
 
 	@Override
@@ -50,13 +60,13 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 
 	@Override
 	public Optional<RoIri> find(IRI iri) {
-		String namespace = RoIriDictionary.storedNamespace(iri);
-		String localName = RoIriDictionary.storedLocalName(iri);
-		if (namespace.equals(roNamespace.getName())) {
-			return findId(FilterPredicate.eq(RoIriDictionary.IRI_VALUE, localName))
-					.map(id -> new RoIri(nameSpacedId(id), roIriDictionary, iri));
+		if (!RoIriDictionary.storedNamespace(iri).equals(roNamespace.getName())) {
+			return Optional.empty();
 		}
-		return Optional.empty();
+		String localName = RoIriDictionary.storedLocalName(iri);
+		return iris.first(FilterPredicate.and(inNamespace(), FilterPredicate.eq(RoIriDictionary.IRI_VALUE, localName)),
+				c -> c.getColumnReader(RoDictionary.ID).getLongs()[0], RoDictionary.ID)
+				.map(local -> new RoIri(nameSpacedId(local), roIriDictionary, iri));
 	}
 
 	private long nameSpacedId(long id) {
@@ -65,7 +75,6 @@ public class BasicRoIriNamespaceDictionary extends RoDictionary<RoIri, IRI>
 
 	@Override
 	public Stream<IRI> values() {
-		// TODO Auto-generated method stub
 		return Stream.empty();
 	}
 }

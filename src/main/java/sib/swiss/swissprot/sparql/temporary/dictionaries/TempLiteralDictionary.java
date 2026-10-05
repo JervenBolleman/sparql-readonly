@@ -82,6 +82,10 @@ public class TempLiteralDictionary extends TempDictionary {
         if (file.exists()) {
             file.delete();
         }
+        if (groups.isEmpty()) {
+            // without literals there is no file
+            return new RoLiteralDict(ParquetTable.open(hardwood, file));
+        }
         try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoLiteralDict.SCHEMA, ParquetTable.LOOKUP_CONFIG)) {
             LiteralBatch batch = new LiteralBatch(writer);
             for (ProvisionalGroup<String> group : groups) {

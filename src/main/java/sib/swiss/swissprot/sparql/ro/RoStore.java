@@ -7,10 +7,14 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -128,15 +132,9 @@ public class RoStore extends AbstractSail {
 			}
 		}
 
+		// created by loading when it writes into them
 		for (RoDirectories dir : RoDirectories.values()) {
-			File subDataDir = new File(dataDir, dir.getDirectoryName());
-			subDataDirs.put(dir, subDataDir);
-			if (!subDataDir.exists()) {
-				if (!subDataDir.mkdirs()) {
-					throw new SailException("SubDataDirectory:" + subDataDir
-							+ " does not exist and can not be created");
-				}
-			}
+			subDataDirs.put(dir, new File(dataDir, dir.getDirectoryName()));
 		}
 		namespaces = new RoNamespaces();
 		hardwood = Hardwood.create();
@@ -149,28 +147,68 @@ public class RoStore extends AbstractSail {
 		vf = new RoValueFactory();
 	}
 
+	/**
+	 * Opens the dictionaries a load wrote into the data directory, empty ones
+	 * if there are none.
+	 */
 	private void reinitIriDictionaries() throws IOException {
-		iriDict = new RoIriDictionary(getNamespaces());
-		final File literalsDir = subDataDirs
-				.get(RoDirectories.OTHER_VALUE_DICTIONARIES);
-
-		if (!literalsDir.exists()) {
-			literalsDir.mkdir();
+		File namespacesDir = subDataDirs.get(RoDirectories.NAMESPACES);
+		File namespacesFile = new File(namespacesDir, TempIriDictionary.NAMESPACES_FILE);
+		if (namespacesFile.exists()) {
+			iriDict = RoIriDictionary.open(namespacesFile,
+					new File(subDataDirs.get(RoDirectories.IRI_DICTIONARIES), TempIriDictionary.IRIS_FILE),
+					hardwood);
+		} else {
+			iriDict = new RoIriDictionary(new RoNamespaces());
 		}
 		literalDict = new RoLiteralDict(ParquetTable.open(hardwood,
-				new File(literalsDir, RoLiteralDict.PATH_NAME)));
-
-		final File integerDir = subDataDirs
-				.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES);
-		if (!integerDir.exists()) {
-			integerDir.mkdir();
-		}
+				new File(subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), RoLiteralDict.PATH_NAME)));
 		integerDict = new RoBigIntegerDict(ParquetTable.open(hardwood,
-				new File(integerDir, RoBigIntegerDict.PATH_NAME)));
+				new File(subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), RoBigIntegerDict.PATH_NAME)));
+		readPrefixes(new File(namespacesDir, PREFIXES_FILE));
+	}
 
-		File bnodesDir = subDataDirs.get(RoDirectories.BNODE_DICTIONARIES);
-		if (!bnodesDir.exists()) {
-			bnodesDir.mkdir();
+	/**
+	 * The prefixes declared in the loaded files, a line of prefix, tab,
+	 * namespace each.
+	 */
+	private static final String PREFIXES_FILE = "prefixes";
+
+	private void readPrefixes(File file) throws IOException {
+		if (!file.exists()) {
+			return;
+		}
+		for (String line : Files.readAllLines(file.toPath(), StandardCharsets.UTF_8)) {
+			int tab = line.indexOf('\t');
+			if (tab >= 0) {
+				namespaces.add(line.substring(0, tab), line.substring(tab + 1));
+			}
+		}
+	}
+
+	private void writePrefixes(File file) throws IOException {
+		List<String> lines = new ArrayList<>();
+		for (RoNamespace namespace : namespaces) {
+			if (namespace.getPrefix() != null) {
+				lines.add(namespace.getPrefix() + '\t' + namespace.getName());
+			}
+		}
+		if (lines.isEmpty()) {
+			Files.deleteIfExists(file.toPath());
+		} else {
+			Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
+		}
+	}
+
+	/**
+	 * Removes the directories of the store that a load left empty.
+	 */
+	private void deleteEmptyDirectories() throws IOException {
+		for (File dir : subDataDirs.values()) {
+			String[] files = dir.list();
+			if (files != null && files.length == 0) {
+				Files.delete(dir.toPath());
+			}
 		}
 	}
 
@@ -199,13 +237,17 @@ public class RoStore extends AbstractSail {
 	 */
 	public void load(File... files)
 			throws RDFParseException, RDFHandlerException, IOException {
+		for (File dir : subDataDirs.values()) {
+			Files.createDirectories(dir.toPath());
+		}
 		final File stagingFile = new File(getDataDir(), "staged-triples");
 		try (SpillContext spill = new SpillContext(loadMemory, new File(getDataDir(), "spill"),
 				hardwood, true)) {
 			final TempLiteralDictionary literals = new TempLiteralDictionary(
 					subDataDirs.get(RoDirectories.OTHER_VALUE_DICTIONARIES), hardwood, spill);
 			final TempIriDictionary iris = new TempIriDictionary(
-					subDataDirs.get(RoDirectories.IRI_DICTIONARIES), hardwood, spill);
+					subDataDirs.get(RoDirectories.IRI_DICTIONARIES),
+					subDataDirs.get(RoDirectories.NAMESPACES), hardwood, spill);
 			final TempIntegerDictionary integers = new TempIntegerDictionary(
 					subDataDirs.get(RoDirectories.NUMBERIC_VALUE_DICTIONARIES), hardwood, spill);
 			long phase = System.nanoTime();
@@ -231,6 +273,8 @@ public class RoStore extends AbstractSail {
 				LOGGER.warning("Could not delete " + stagingFile);
 			}
 		}
+		writePrefixes(new File(subDataDirs.get(RoDirectories.NAMESPACES), PREFIXES_FILE));
+		deleteEmptyDirectories();
 		reinitPredicateStores();
 	}
 
@@ -357,8 +401,8 @@ public class RoStore extends AbstractSail {
 		stores.clear();
 		RoDictionaries dictionaries = new RoDictionaries(iriDict, literalDict,
 				integerDict);
-		for (File predicateDir : subDataDirs.get(RoDirectories.PREDICATE_LISTS)
-				.listFiles()) {
+		File[] predicateDirs = subDataDirs.get(RoDirectories.PREDICATE_LISTS).listFiles();
+		for (File predicateDir : predicateDirs == null ? new File[0] : predicateDirs) {
 			final RoPredicateStore roPredicateStore = new RoPredicateStore(
 					predicateDir, dictionaries, hardwood);
 			RoIri predicate = roPredicateStore.getPredicate();

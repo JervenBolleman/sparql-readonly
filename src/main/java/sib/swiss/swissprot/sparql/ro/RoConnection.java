@@ -130,16 +130,10 @@ public class RoConnection implements SailConnection {
 
 	@Override
 	public String getNamespace(String prefix) throws SailException {
-		return store.getNamespaces().stream().map(RoNamespace::getPrefix)
-				.filter(n -> {
-					if (prefix == null && n == null) {
-						return true;
-					} else if (prefix != null && prefix.equals(n)) {
-						return true;
-					} else {
-						return false;
-					}
-				}).findAny().orElse(null);
+		return store.getNamespaces().stream()
+				.filter(n -> java.util.Objects.equals(prefix, n.getPrefix()))
+				.map(RoNamespace::getName)
+				.findAny().orElse(null);
 
 	}
 

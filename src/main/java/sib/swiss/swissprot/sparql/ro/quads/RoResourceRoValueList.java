@@ -1,15 +1,17 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.Closeable;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.util.HashMap;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -103,70 +105,56 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         return new File(file.getParentFile(), file.getName() + "-by-object");
     }
 
-    protected static File getIriGraphsFile(File file) {
-        return new File(file.getParentFile(), file.getName() + "irigraphs");
+    /**
+     * The rows of the list in each named graph. Only a list with triples in
+     * named graphs has this file: the number of graphs, then per graph
+     * whether it is an IRI, its id and a serialized RoaringBitmap of rows.
+     */
+    static File graphsFile(File file) {
+        return new File(file.getParentFile(), file.getName() + "-graphs");
     }
 
-    private static void readData(ObjectInputStream in,
-            long[] graphIds, RoaringBitmap[] maps)
-            throws IOException, ClassNotFoundException {
+    private interface GraphReader {
 
-        for (int i = 0; i < graphIds.length; i++) {
-            graphIds[i] = in.readLong();
+        void graph(boolean iri, long id, RoaringBitmap rows);
+    }
+
+    private static void readGraphs(File file, GraphReader reader) throws IOException {
+        File graphs = graphsFile(file);
+        if (!graphs.exists()) {
+            return;
         }
-        for (int i = 0; i < graphIds.length; i++) {
-            RoaringBitmap map = (RoaringBitmap) in.readObject();
-            maps[i] = map;
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(graphs)))) {
+            int numberOfGraphs = in.readInt();
+            for (int i = 0; i < numberOfGraphs; i++) {
+                boolean iri = in.readBoolean();
+                long id = in.readLong();
+                RoaringBitmap rows = new RoaringBitmap();
+                rows.deserialize(in);
+                reader.graph(iri, id, rows);
+            }
         }
     }
 
     protected static Map<RoIri, RoaringBitmap> getRoIriGraphsMap(File file, RoIriDictionary iriDict)
-            throws FileNotFoundException, IOException {
-        File graphs = getBnodeGraphsFile(file);
-        try (ObjectInputStream in = new ObjectInputStream(
-                new FileInputStream(graphs))) {
-            int numberOfGraphs = in.readInt();
-            long[] graphIds = new long[numberOfGraphs];
-            RoaringBitmap[] roaringBitmaps = new RoaringBitmap[numberOfGraphs];
-            readData(in, graphIds, roaringBitmaps);
-
-            Map<RoIri, RoaringBitmap> map = new HashMap<>();
-            for (int i = 0; i < numberOfGraphs; i++) {
-                map.put(new RoIri(graphIds[i], iriDict), roaringBitmaps[i]);
+            throws IOException {
+        Map<RoIri, RoaringBitmap> map = new HashMap<>();
+        readGraphs(file, (iri, id, rows) -> {
+            if (iri) {
+                map.put(new RoIri(id, iriDict), rows);
             }
-            return map;
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
+        });
+        return map;
     }
 
-    protected static Map<RoBnode, RoaringBitmap> getRoBnodeGraphsMap(File file)
-            throws FileNotFoundException, IOException {
-        File graphs = getBnodeGraphsFile(file);
-        try (ObjectInputStream in = new ObjectInputStream(
-                new FileInputStream(graphs))) {
-            int numberOfGraphs = in.readInt();
-            long[] graphIds = new long[numberOfGraphs];
-            RoaringBitmap[] roaringBitmaps = new RoaringBitmap[numberOfGraphs];
-            readData(in, graphIds, roaringBitmaps);
-
-            Map<RoBnode, RoaringBitmap> map = new HashMap<>();
-            for (int i = 0; i < numberOfGraphs; i++) {
-                map.put(new RoBnode(graphIds[i]), roaringBitmaps[i]);
+    protected static Map<RoBnode, RoaringBitmap> getRoBnodeGraphsMap(File file) throws IOException {
+        Map<RoBnode, RoaringBitmap> map = new HashMap<>();
+        readGraphs(file, (iri, id, rows) -> {
+            if (!iri) {
+                map.put(new RoBnode(id), rows);
             }
-            return map;
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
-    }
-
-    private static File getBnodeGraphsFile(File file) {
-        return new File(file.getParentFile(), file.getName() + "bnodegraphs");
-    }
-
-    protected static File getRoNamespacesFile(File file) {
-        final File file1 = new File(file.getParentFile(), file.getName() + "namespaces");
-        return file1;
+        });
+        return map;
     }
 
     public RoResource findGraphForTriple(int at) {
@@ -306,43 +294,27 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             triples.add(subject.getLongId(), object.getLongId(), contextNumber);
         }
 
-        protected void saveNamespace(RoNamespaces namespaces, File file) throws IOException {
-            File roNamespacesFile = getRoNamespacesFile(file);
-            try (DataOutputStream dasN = new DataOutputStream(new FileOutputStream(roNamespacesFile))) {
-                dasN.writeInt(namespaces.size());
-
-                for (RoNamespace en : namespaces) {
-                    if (en.getPrefix() != null) {
-                        dasN.writeBoolean(true);
-                        dasN.writeUTF(en.getPrefix());
-                    } else {
-                        dasN.writeBoolean(false);
-                    }
-                    dasN.writeUTF(en.getName());
-                    dasN.writeLong(en.getId());
-                }
+        /**
+         * Writes the rows per named graph, if the list has triples in named
+         * graphs; otherwise removes the file an earlier load left.
+         */
+        protected void saveContextBitmaps() throws IOException {
+            File graphs = graphsFile(file);
+            if (iriGraphsMap.isEmpty() && bnodeGraphsMap.isEmpty()) {
+                Files.deleteIfExists(graphs.toPath());
+                return;
             }
-        }
-
-        protected void saveContextBitmaps()
-                throws FileNotFoundException, IOException {
-            writeMapToDisk(getIriGraphsFile(file), iriGraphsMap);
-            writeMapToDisk(getBnodeGraphsFile(file), bnodeGraphsMap);
-        }
-
-        private void writeMapToDisk(File graphs,
-                Map<? extends RoResource, RoaringBitmap> map)
-                throws IOException, FileNotFoundException {
-            try (ObjectOutputStream out = new ObjectOutputStream(
-                    new FileOutputStream(graphs))) {
-                out.writeInt(map.size());
-                for (Entry<? extends RoResource, RoaringBitmap> en : map
-                        .entrySet()) {
+            try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(graphs)))) {
+                out.writeInt(iriGraphsMap.size() + bnodeGraphsMap.size());
+                for (Entry<RoIri, RoaringBitmap> en : iriGraphsMap.entrySet()) {
+                    out.writeBoolean(true);
                     out.writeLong(en.getKey().getLongId());
+                    en.getValue().serialize(out);
                 }
-                for (Entry<? extends RoResource, RoaringBitmap> en : map
-                        .entrySet()) {
-                    out.writeObject(en.getValue());
+                for (Entry<RoBnode, RoaringBitmap> en : bnodeGraphsMap.entrySet()) {
+                    out.writeBoolean(false);
+                    out.writeLong(en.getKey().getLongId());
+                    en.getValue().serialize(out);
                 }
             }
         }
@@ -387,7 +359,6 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             triples.finish((context, row) -> bitmapForContext(contexts.get(context)).add((int) row));
             writeByObject();
             saveContextBitmaps();
-            saveNamespace(dictionaries.getIriDict().getNamespaces(), file);
         }
     }
 

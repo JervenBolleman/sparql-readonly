@@ -1,9 +1,8 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -14,25 +13,25 @@ import java.util.List;
 import java.util.Map;
 
 import dev.hardwood.Hardwood;
-import dev.hardwood.metadata.LogicalType;
-import dev.hardwood.metadata.PhysicalType;
-import dev.hardwood.metadata.RepetitionType;
-import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
 import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
-import sib.swiss.swissprot.sparql.ro.RoNamespace;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
 
-    private static final FileSchema SCHEMA = FileSchema.builder("iris")
-            .addColumn(RoDictionary.ID, PhysicalType.INT64, RepetitionType.REQUIRED)
-            .addColumn(RoIriDictionary.IRI_VALUE, PhysicalType.BYTE_ARRAY, RepetitionType.REQUIRED, new LogicalType.StringType())
-            .build();
+    /**
+     * The file of the local names of the namespaces that are not a prefix and
+     * a number.
+     */
+    public static final String IRIS_FILE = "iris";
+    /**
+     * The file of the namespaces.
+     */
+    public static final String NAMESPACES_FILE = "iri-namespaces";
 
     protected static class DataDistribution {
 
@@ -111,17 +110,24 @@ public class TempIriDictionary extends TempDictionary {
     }
 
     private final SpillContext spill;
+    private final File namespacesDir;
     private final Map<String, ProvisionalGroup<String>> byNamespace = new HashMap<>();
     private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
     private final List<String> namespaceOfGroup = new ArrayList<>();
     private final List<DataDistribution> distributionOfGroup = new ArrayList<>();
 
     public TempIriDictionary(File out, Hardwood hardwood) {
-        this(out, hardwood, SpillContext.unbounded(hardwood));
+        this(out, out, hardwood, SpillContext.unbounded(hardwood));
     }
 
-    public TempIriDictionary(File out, Hardwood hardwood, SpillContext spill) {
+    /**
+     * @param out where the local names are written, see {@link #IRIS_FILE}
+     * @param namespacesDir where the namespaces are written, see
+     * {@link #NAMESPACES_FILE}
+     */
+    public TempIriDictionary(File out, File namespacesDir, Hardwood hardwood, SpillContext spill) {
         super(out, hardwood);
+        this.namespacesDir = namespacesDir;
         this.spill = spill;
     }
 
@@ -158,55 +164,157 @@ public class TempIriDictionary extends TempDictionary {
     }
 
     /**
-     * Writes a dictionary per namespace, the largest first, and assigns the
-     * final ids.
+     * Writes the namespaces, the largest first, and the local names of all of
+     * them into one file, and assigns the final ids.
      */
     public RoIriDictionary load() throws IOException {
         List<ProvisionalGroup<String>> biggestFirst = new ArrayList<>(groups);
         biggestFirst.sort(Comparator.comparingInt((ProvisionalGroup<String> g) -> g.provisionalIds()).reversed());
 
-        RoNamespaces namespaces = new RoNamespaces();
-        RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
-        for (ProvisionalGroup<String> group : biggestFirst) {
-            RoNamespace roNamespace = namespaces.add(null, namespaceOfGroup.get(group.index()));
-            final long namespaceBits = roNamespace.getId() << RoNamespaces.BITS_FOR_NAMESPACES;
-            DataDistribution data = distributionOfGroup.get(group.index());
-
-            File iriFile = new File(out, roNamespace.getId() + "-iris");
-            File bitmapFile = new File(out, roNamespace.getId() + "-prefixed-iris");
-            File infoFile = new File(out, roNamespace.getId() + "-offsets");
-            if (data.allNumericWithPrefix()) {
-                // the id is the number after the prefix
-                final int prefixLength = data.longestCommonPrefix == null ? 0 : data.longestCommonPrefix.length();
-                final RoaringBitmap numbers = new RoaringBitmap();
-                group.finish(localName -> {
-                    int number = Integer.parseInt(localName.substring(prefixLength));
-                    numbers.add(number);
-                    return namespaceBits | number;
-                });
-                writeNamespaceWithPrefixedNumbersToDisk(numbers, bitmapFile, infoFile, data);
-                iriDictionary.addPredixFollowedByBNumberDictionary(infoFile, bitmapFile, roNamespace);
-            } else {
-                // the id is the row in the sorted dictionary
-                try (IdValueWriter writer = new IdValueWriter(iriFile, SCHEMA, RoIriDictionary.IRI_VALUE)) {
-                    group.finish(localName -> namespaceBits | writer.add(localName));
+        File irisFile = new File(out, IRIS_FILE);
+        File namespacesFile = new File(namespacesDir, NAMESPACES_FILE);
+        Files.createDirectories(namespacesDir.toPath());
+        NamespaceRows namespaces = new NamespaceRows(biggestFirst.size());
+        try (IriRowWriter iris = new IriRowWriter(irisFile)) {
+            for (int id = 0; id < biggestFirst.size(); id++) {
+                ProvisionalGroup<String> group = biggestFirst.get(id);
+                final long namespaceBits = ((long) id) << RoNamespaces.BITS_FOR_NAMESPACES;
+                final long namespaceId = id;
+                DataDistribution data = distributionOfGroup.get(group.index());
+                String namespace = namespaceOfGroup.get(group.index());
+                if (data.allNumericWithPrefix()) {
+                    // the id is the number after the prefix
+                    final String prefix = data.longestCommonPrefix == null ? "" : data.longestCommonPrefix;
+                    final RoaringBitmap numbers = new RoaringBitmap();
+                    group.finish(localName -> {
+                        int number = Integer.parseInt(localName.substring(prefix.length()));
+                        numbers.add(number);
+                        return namespaceBits | number;
+                    });
+                    namespaces.addNumbers(id, namespace, prefix, data.minLength, numbers);
+                } else {
+                    // the id is the row of the name within the namespace
+                    final long[] local = new long[1];
+                    group.finish(localName -> {
+                        iris.add(namespaceId, local[0], localName);
+                        return namespaceBits | local[0]++;
+                    });
+                    namespaces.addNames(id, namespace);
                 }
-                iriDictionary.addBasicRoIriNamespaceDictionary(ParquetTable.open(hardwood, iriFile), roNamespace);
             }
         }
-        return iriDictionary;
+        namespaces.write(namespacesFile);
+        return RoIriDictionary.open(namespacesFile, irisFile, hardwood);
     }
 
-    private void writeNamespaceWithPrefixedNumbersToDisk(RoaringBitmap numbers, File bitmapFile,
-            File infoFile, DataDistribution data) throws IOException {
-        String longestCommonPrefix = data.longestCommonPrefix == null ? "" : data.longestCommonPrefix;
-        try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(bitmapFile))) {
-            numbers.serialize(dos);
+    /**
+     * The rows of the namespace table, see
+     * {@link RoIriDictionary#NAMESPACES_SCHEMA}.
+     */
+    private static final class NamespaceRows {
+
+        private final long[] ids;
+        private final byte[][] namespaces;
+        private final byte[][] prefixes;
+        private final int[] lengths;
+        private final byte[][] numbers;
+        private final boolean[] names;
+        private int size;
+
+        private NamespaceRows(int capacity) {
+            ids = new long[capacity];
+            namespaces = new byte[capacity][];
+            prefixes = new byte[capacity][];
+            lengths = new int[capacity];
+            numbers = new byte[capacity][];
+            names = new boolean[capacity];
         }
-        List<String> info = Arrays.asList(new String[]{
-            String.valueOf(longestCommonPrefix.length()),
-            longestCommonPrefix, String.valueOf(data.minLength),
-            String.valueOf(data.maxLength)});
-        Files.write(infoFile.toPath(), info, StandardCharsets.UTF_8);
+
+        void addNames(long id, String namespace) {
+            ids[size] = id;
+            namespaces[size] = namespace.getBytes(StandardCharsets.UTF_8);
+            names[size] = true;
+            size++;
+        }
+
+        void addNumbers(long id, String namespace, String prefix, int length, RoaringBitmap bitmap) {
+            ids[size] = id;
+            namespaces[size] = namespace.getBytes(StandardCharsets.UTF_8);
+            prefixes[size] = prefix.getBytes(StandardCharsets.UTF_8);
+            lengths[size] = length;
+            bitmap.runOptimize();
+            ByteBuffer serialized = ByteBuffer.allocate(bitmap.serializedSizeInBytes());
+            bitmap.serialize(serialized);
+            numbers[size] = serialized.array();
+            size++;
+        }
+
+        void write(File file) throws IOException {
+            if (size == 0) {
+                Files.deleteIfExists(file.toPath());
+                return;
+            }
+            try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoIriDictionary.NAMESPACES_SCHEMA)) {
+                writer.writeBatch(b -> b.longs(RoIriDictionary.NAMESPACE_ID, ids)
+                        .bytes(RoIriDictionary.NAMESPACE_IRI, namespaces)
+                        .bytes(RoIriDictionary.NUMBER_PREFIX, prefixes, names)
+                        .ints(RoIriDictionary.NAME_LENGTH, lengths, names)
+                        .bytes(RoIriDictionary.NUMBERS, numbers, names));
+            }
+        }
+    }
+
+    /**
+     * Writes the rows of the IRI file, see {@link RoIriDictionary#IRIS_SCHEMA},
+     * in batches. Without rows there is no file.
+     */
+    private final class IriRowWriter implements java.io.Closeable {
+
+        private static final int BATCH_SIZE = 64 * 1024;
+        private final File file;
+        private ParquetTable.Writer writer;
+        private final long[] namespaceIds = new long[BATCH_SIZE];
+        private final long[] ids = new long[BATCH_SIZE];
+        private final byte[][] values = new byte[BATCH_SIZE][];
+        private int size;
+
+        private IriRowWriter(File file) {
+            this.file = file;
+        }
+
+        void add(long namespace, long id, String localName) throws IOException {
+            if (size == BATCH_SIZE) {
+                flush();
+            }
+            namespaceIds[size] = namespace;
+            ids[size] = id;
+            values[size] = localName.getBytes(StandardCharsets.UTF_8);
+            size++;
+        }
+
+        private void flush() throws IOException {
+            if (size == 0) {
+                return;
+            }
+            if (writer == null) {
+                writer = new ParquetTable.Writer(file, RoIriDictionary.IRIS_SCHEMA, ParquetTable.LOOKUP_CONFIG);
+            }
+            final long[] n = Arrays.copyOf(namespaceIds, size);
+            final long[] i = Arrays.copyOf(ids, size);
+            final byte[][] v = Arrays.copyOf(values, size);
+            writer.writeBatch(b -> b.longs(RoIriDictionary.NAMESPACE, n).longs(RoDictionary.ID, i)
+                    .bytes(RoIriDictionary.IRI_VALUE, v));
+            size = 0;
+        }
+
+        @Override
+        public void close() throws IOException {
+            flush();
+            if (writer != null) {
+                writer.close();
+            } else {
+                Files.deleteIfExists(file.toPath());
+            }
+        }
     }
 }

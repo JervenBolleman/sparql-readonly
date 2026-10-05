@@ -42,7 +42,7 @@ flowchart TD
     parse -->|"triples as<br/>(kind, provisional id)"| staged[("staged-triples")]
     temp --> dict["2. Write the dictionaries<br/>merge, sort, assign final ids"]
     runs --> dict
-    dict --> dicts[("iriDictionaries/<br/>otherValueDictionaries/<br/>numberDictionaries/")]
+    dict --> dicts[("namespaces/<br/>iriDictionaries/<br/>otherValueDictionaries/<br/>numberDictionaries/")]
     dict -->|"provisional → final<br/>arrays"| remap["3. Remap<br/>RoStore.storeStaged"]
     staged --> remap
     remap -->|"(subject, object, context)<br/>per predicate and type"| sort["4. Sort and write<br/>SortedTripleWriter"]
@@ -100,7 +100,7 @@ an array per group (8 bytes per provisional id).
 
 | Dictionary | Final id |
 | --- | --- |
-| IRI namespace | `namespace << 32 \| row in the sorted names`, or `\| number` for a prefix-and-number namespace. Namespaces are numbered largest first. |
+| IRI namespace | `namespace << 32 \| row of the name in the namespace`, or `\| number` for a prefix-and-number namespace. Namespaces are numbered largest first; all names go into one file. |
 | literals | the row in one file holding all groups, each sorted |
 | big integers | the row, with the high bit set |
 
@@ -123,7 +123,9 @@ recorded in a bitmap per graph.
 The list is then read back and written again sorted by object, then
 subject, as the list's `-by-object` copy.
 
-Finally the staging file, the spill directory and all runs are deleted.
+Finally the staging file, the spill directory and all runs are deleted,
+the prefixes declared in the files are written to `namespaces/prefixes`, and
+directories the load left empty are removed.
 
 ## Memory
 
@@ -145,17 +147,17 @@ Not bounded by a setting:
 
 `taxonomy.rdf`, 16.5M triples, 1.4 GB of RDF/XML; 8 cores, `-Xmx4g`, JDK 27.
 
-| Step | Default budget | 64 MB budget |
-| --- | --- | --- |
-| 1. Parse and stage | 68 s | 92 s |
-| 2. Write the dictionaries | 20 s | 11 s |
-| 3. Remap | 8 s | 8 s |
-| 4. Sort and write the triple lists | 40 s | 40 s |
-| Whole load | 137 s | 151 s |
-| Max RSS | 3.1 GB | 2.8 GB |
+| Step | Default budget |
+| --- | --- |
+| 1. Parse and stage | 72 s |
+| 2. Write the dictionaries | 14 s |
+| 3. Remap | 9 s |
+| 4. Sort and write the triple lists | 15 s |
+| Whole load | 110 s |
 
-The resulting store is 583 MB; see [storage.md](storage.md) for what it
-holds. Both taxonomy files together, 55.9M triples (53.5M distinct), load
+With a 64 MB dictionary budget the dictionaries spill 23 runs; parsing then
+takes longer and writing the dictionaries shorter. The resulting store is
+100 MiB in 67 files; see [storage.md](storage.md) for what it holds. Both taxonomy files together, 55.9M triples (53.5M distinct), load
 and are counted back in under five minutes in `RoStoreTest`.
 
 ## Bottlenecks
@@ -167,19 +169,13 @@ and are counted back in under five minutes in `RoStoreTest`.
 2. **Staging is written on the parsing thread.** Its rate drops while
    hardwood compresses a row group of the staging file. Writing from a
    second thread would hide that.
-3. **Writing the triple lists** spends 26 of its 40 s writing an identical
-   copy of the namespace table next to every list; see "Duplication" in
-   [storage.md](storage.md). Without it the step takes 14 s.
-4. **Every list is written twice,** once per sort order; the copy sorted by
+3. **Every list is written twice,** once per sort order; the copy sorted by
    object is made by reading back the first.
-5. **Memory beyond the budget** grows with the number of distinct values
+4. **Memory beyond the budget** grows with the number of distinct values
    (the remap arrays) and with the number of predicates (open lists).
 
 ## Limitations
 
-- A store can not be reopened: `RoStore.init()` on an existing directory does
-  not read the IRI dictionaries back, so a store is only usable in the
-  process that loaded it.
 - Named graphs are recorded while loading but not used when reading:
   statements come back without their context.
 - Loading into a directory that already holds a store is not supported: the

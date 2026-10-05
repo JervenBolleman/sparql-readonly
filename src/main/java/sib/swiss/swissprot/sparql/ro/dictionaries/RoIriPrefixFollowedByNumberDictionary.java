@@ -69,6 +69,22 @@ public class RoIriPrefixFollowedByNumberDictionary
     private final ImmutableRoaringBitmap bitmap;
     private final RoIriDictionary roIriDictionary;
 
+    /**
+     * @param prefix what every local name starts with
+     * @param length the length of every local name, the number is padded with
+     * zeros to it
+     * @param numbers the numbers that follow the prefix
+     */
+    RoIriPrefixFollowedByNumberDictionary(RoNamespace namespace, String prefix, int length,
+            ImmutableRoaringBitmap numbers, RoIriDictionary roIriDictionary) {
+        this.namespace = namespace;
+        this.roIriDictionary = roIriDictionary;
+        this.prefix = prefix;
+        this.minLength = length;
+        this.maxLength = length;
+        this.bitmap = numbers;
+    }
+
     protected RoIriPrefixFollowedByNumberDictionary(File infoFile,
             File bitmapFile, RoNamespace namespace,
             RoIriDictionary roIriDictionary) throws IOException {
