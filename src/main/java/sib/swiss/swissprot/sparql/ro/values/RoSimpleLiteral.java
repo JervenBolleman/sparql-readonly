@@ -21,6 +21,10 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
     private static final long serialVersionUID = 1L;
     private final RoLiteralDict dict;
     private final long id;
+    /**
+     * The label once read: asked for by hashing, comparing and writing.
+     */
+    private transient String label;
 
     public RoSimpleLiteral(long id, RoLiteralDict roLiteralDict) {
         this.id = id;
@@ -43,12 +47,17 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
 
     @Override
     public String stringValue() {
-        return dict.stringValue(id);
+        return getLabel();
     }
 
     @Override
     public String getLabel() {
-        return dict.stringValue(id);
+        String read = label;
+        if (read == null) {
+            read = dict.stringValue(id);
+            label = read;
+        }
+        return read;
     }
 
     /**

@@ -5,8 +5,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.LongFunction;
 import java.util.stream.Stream;
 
 import dev.hardwood.Hardwood;
@@ -60,6 +62,17 @@ public class RoIriDictionary implements Closeable {
     private ParquetTable iris;
     private static final int BITS_IN_A_LONG = Long.BYTES*8;
     private final Map<Long, RoIriNamespaceDictionary> idToIriDictionaryMap;
+    /**
+     * Local names read last, a block of ids at a time, least recently used
+     * first, for all namespaces of names together.
+     */
+    private final Map<Long, String[]> localNameBlocks = new LinkedHashMap<>(128, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, String[]> eldest) {
+            return size() > CACHED_LOCAL_NAME_BLOCKS;
+        }
+    };
+    private static final int CACHED_LOCAL_NAME_BLOCKS = 64;
     private final RoNamespaces namespaces;
 
     public Optional<String> getLocalNameFromId(long id) throws IOException {
@@ -139,6 +152,25 @@ public class RoIriDictionary implements Closeable {
      * {@link #NAMESPACES_SCHEMA}
      * @param irisFile the local names, see {@link #IRIS_SCHEMA}
      */
+    /**
+     * @param key the namespaced id of the first IRI of the block
+     * @param read reads the block if it is not cached
+     * @return the local names of the block
+     */
+    String[] localNameBlock(long key, LongFunction<String[]> read) {
+        synchronized (localNameBlocks) {
+            String[] block = localNameBlocks.get(key);
+            if (block != null) {
+                return block;
+            }
+        }
+        String[] block = read.apply(key);
+        synchronized (localNameBlocks) {
+            localNameBlocks.put(key, block);
+        }
+        return block;
+    }
+
     public static RoIriDictionary open(File namespacesFile, File irisFile, Hardwood hardwood) throws IOException {
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary dictionary = new RoIriDictionary(namespaces);

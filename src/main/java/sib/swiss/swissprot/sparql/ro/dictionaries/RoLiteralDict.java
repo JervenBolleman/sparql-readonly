@@ -1,13 +1,18 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
-import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import dev.hardwood.metadata.LogicalType;
 import dev.hardwood.metadata.PhysicalType;
 import dev.hardwood.metadata.RepetitionType;
+import dev.hardwood.Validity;
+import dev.hardwood.reader.ColumnReader;
+import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.schema.FileSchema;
 import org.eclipse.rdf4j.model.IRI;
@@ -32,8 +37,85 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
             .addColumn(LANGUAGE, PhysicalType.BYTE_ARRAY, RepetitionType.OPTIONAL, new LogicalType.StringType())
             .build();
 
+    /**
+     * Literals read at a time, as many as a row group holds: a literal is
+     * mostly read along with others of nearby ids, the objects of one
+     * subject or of subjects next to each other.
+     */
+    private static final int BLOCK_SIZE = 4096;
+    private static final int CACHED_BLOCKS = 32;
+
+    /**
+     * The literals of a block of ids, starting at a multiple of
+     * {@link #BLOCK_SIZE}.
+     */
+    private record Block(String[] labels, IRI[] datatypes, String[] languages) {
+    }
+
+    /**
+     * The blocks read last, least recently used first.
+     */
+    private final Map<Long, Block> blocks = new LinkedHashMap<>(CACHED_BLOCKS * 2, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Block> eldest) {
+            return size() > CACHED_BLOCKS;
+        }
+    };
+    /**
+     * Datatypes are few: one IRI each.
+     */
+    private final Map<String, IRI> datatypes = new ConcurrentHashMap<>();
+
     public RoLiteralDict(ParquetTable table) {
         super(table, LABEL);
+    }
+
+    /**
+     * @return the block holding the literal, null if there is none
+     */
+    private Block block(long id) {
+        long start = id - Math.floorMod(id, BLOCK_SIZE);
+        synchronized (blocks) {
+            Block block = blocks.get(start);
+            if (block != null) {
+                return block;
+            }
+        }
+        Block block = read(start);
+        synchronized (blocks) {
+            blocks.put(start, block);
+        }
+        return block;
+    }
+
+    private Block read(long start) {
+        String[] labels = new String[BLOCK_SIZE];
+        IRI[] types = new IRI[BLOCK_SIZE];
+        String[] languages = new String[BLOCK_SIZE];
+        FilterPredicate inBlock = FilterPredicate.and(FilterPredicate.gtEq(ID, start),
+                FilterPredicate.lt(ID, start + BLOCK_SIZE));
+        Optional<ColumnReaders> batches = table.columns(inBlock, BLOCK_SIZE, ID, LABEL, DATATYPE, LANGUAGE);
+        if (batches.isPresent()) {
+            try (ColumnReaders rows = batches.get()) {
+                while (rows.nextBatch()) {
+                    long[] ids = rows.getColumnReader(ID).getLongs();
+                    String[] batchLabels = rows.getColumnReader(LABEL).getStrings();
+                    String[] batchTypes = rows.getColumnReader(DATATYPE).getStrings();
+                    ColumnReader language = rows.getColumnReader(LANGUAGE);
+                    String[] batchLanguages = language.getStrings();
+                    Validity present = language.getLeafValidity();
+                    for (int i = 0; i < ids.length; i++) {
+                        int at = (int) (ids[i] - start);
+                        labels[at] = batchLabels[i];
+                        types[at] = datatypes.computeIfAbsent(batchTypes[i], Values::iri);
+                        if (present.isNotNull(i) && batchLanguages[i] != null && !batchLanguages[i].isEmpty()) {
+                            languages[at] = batchLanguages[i];
+                        }
+                    }
+                }
+            }
+        }
+        return new Block(labels, types, languages);
     }
 
     @Override
@@ -53,21 +135,20 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public String stringValue(long id) {
-        try {
-            return readStringAt(id);
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
+        String label = block(id).labels()[Math.floorMod(id, BLOCK_SIZE)];
+        if (label == null) {
+            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
             return "";
         }
+        return label;
     }
 
     public IRI dataType(long id) {
-        Optional<String> datatype = readStringAt(id, DATATYPE);
-        if (datatype.isEmpty()) {
+        IRI datatype = block(id).datatypes()[Math.floorMod(id, BLOCK_SIZE)];
+        if (datatype == null) {
             Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, "No literal at {0}", id);
-            return null;
         }
-        return Values.iri(datatype.get());
+        return datatype;
     }
 
     public RoLiteral get(long id) {
@@ -75,6 +156,6 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public Optional<String> language(long id) {
-        return readStringAt(id, LANGUAGE).filter(s -> !s.isEmpty());
+        return Optional.ofNullable(block(id).languages()[Math.floorMod(id, BLOCK_SIZE)]);
     }
 }

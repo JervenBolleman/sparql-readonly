@@ -1,8 +1,10 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.reader.FilterPredicate;
 import org.eclipse.rdf4j.model.IRI;
 
@@ -19,6 +21,10 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 
 	private static final int BITS_IN_A_LONG = Long.BYTES * 8;
+	/**
+	 * Local names read at a time, as many as a row group holds.
+	 */
+	private static final int BLOCK_SIZE = 4096;
 
 	private final ParquetTable iris;
 	private final RoNamespace roNamespace;
@@ -44,8 +50,38 @@ public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 			return Optional.empty();
 		}
 		long local = id & 0xFFFF_FFFFL;
-		return iris.first(FilterPredicate.and(inNamespace(), FilterPredicate.eq(RoDictionary.ID, local)),
-				c -> c.getColumnReader(RoIriDictionary.IRI_VALUE).getStrings()[0], RoIriDictionary.IRI_VALUE);
+		long start = local - local % BLOCK_SIZE;
+		String[] block = roIriDictionary.localNameBlock(nameSpacedId(start), key -> read(start));
+		int at = (int) (local - start);
+		return at < block.length ? Optional.ofNullable(block[at]) : Optional.empty();
+	}
+
+	/**
+	 * Reads the local names of a block of local ids: IRIs are mostly read
+	 * along with others of nearby ids.
+	 */
+	private String[] read(long start) {
+		String[] names = new String[0];
+		FilterPredicate inBlock = FilterPredicate.and(inNamespace(), FilterPredicate.gtEq(RoDictionary.ID, start),
+				FilterPredicate.lt(RoDictionary.ID, start + BLOCK_SIZE));
+		Optional<ColumnReaders> batches = iris.columns(inBlock, BLOCK_SIZE, RoDictionary.ID, RoIriDictionary.IRI_VALUE);
+		if (batches.isPresent()) {
+			try (ColumnReaders rows = batches.get()) {
+				while (rows.nextBatch()) {
+					long[] ids = rows.getColumnReader(RoDictionary.ID).getLongs();
+					String[] values = rows.getColumnReader(RoIriDictionary.IRI_VALUE).getStrings();
+					for (int i = 0; i < ids.length; i++) {
+						int at = (int) (ids[i] - start);
+						if (at >= names.length) {
+							// a namespace with few names has a short block
+							names = Arrays.copyOf(names, Math.min(BLOCK_SIZE, Math.max(at + 1, names.length * 2)));
+						}
+						names[at] = values[i];
+					}
+				}
+			}
+		}
+		return names;
 	}
 
 	@Override
