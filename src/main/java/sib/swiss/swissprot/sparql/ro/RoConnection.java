@@ -13,9 +13,7 @@ import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.DefaultEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.EvaluationStatistics;
-import org.eclipse.rdf4j.query.algebra.evaluation.optimizer.StandardQueryOptimizerPipeline;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.UnknownSailTransactionStateException;
@@ -52,10 +50,8 @@ public class RoConnection implements SailConnection {
 			boolean includeInferred) throws SailException {
 		try {
 			EvaluationStatistics statistics = new EvaluationStatistics();
-			DefaultEvaluationStrategy strategy = new DefaultEvaluationStrategy(
-					tripleSource, dataset, store.getFederatedServiceResolver());
-			strategy.setOptimizerPipeline(new StandardQueryOptimizerPipeline(
-					strategy, tripleSource, statistics));
+			RoEvaluationStrategy strategy = new RoEvaluationStrategy(store,
+					tripleSource, dataset, store.getFederatedServiceResolver(), statistics);
 			TupleExpr optimized = strategy.optimize(tupleExpr.clone(),
 					statistics, bindings);
 			return strategy.precompile(optimized).evaluate(bindings);

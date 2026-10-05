@@ -13,6 +13,8 @@ public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
     private final long value;
 
     public RoIntegerLiteral(long value) {
+        // the inherited value methods read the label
+        super(Long.toString(value), XSD.INT, CoreDatatype.XSD.INT);
         this.value = value;
     }
 

@@ -194,7 +194,14 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
      * @param object null for any
      */
     public Stream<Statement> stream(Resource subject, Value object) {
-        if (subject == null && object == null) {
+        return stream(subject, object, PushedFilter.NONE);
+    }
+
+    /**
+     * @param filter leaves out the triples whose object a FILTER rejects
+     */
+    public Stream<Statement> stream(Resource subject, Value object, PushedFilter filter) {
+        if (subject == null && object == null && filter == PushedFilter.NONE) {
             return stream();
         }
         final Term s;
@@ -220,7 +227,10 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
         return lists().stream()
                 .filter(list -> s == null || list.subjectKind() == s.kind())
                 .filter(list -> o == null || list.objectKind() == o.kind())
-                .flatMap(list -> list.stream(s, o));
+                .flatMap(list -> {
+                    PushedFilter.ListRead read = filter.forObjects(list.objectKind());
+                    return read.read() ? list.stream(s, o, read.objects()) : Stream.empty();
+                });
     }
 
     @Override

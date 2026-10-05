@@ -26,6 +26,14 @@ public class RoFilteredTripleIterator implements
      */
     public RoFilteredTripleIterator(RoStore store, Resource subj, IRI pred,
             Value obj, Resource[] contexts) {
+        this(store, subj, pred, obj, contexts, PushedFilter.NONE);
+    }
+
+    /**
+     * @param filter leaves out statements whose object a FILTER rejects
+     */
+    RoFilteredTripleIterator(RoStore store, Resource subj, IRI pred,
+            Value obj, Resource[] contexts, PushedFilter filter) {
         Stream<RoPredicateStore> stores;
         if (pred != null) {
             RoPredicateStore predicateStore = store.getPredicateStore(pred);
@@ -34,7 +42,7 @@ public class RoFilteredTripleIterator implements
             stores = store.getPredicateStores().values().stream();
         }
         // the subject and object are selected by Parquet in the triple lists
-        Stream<Statement> stream = stores.flatMap(p -> p.stream(subj, obj));
+        Stream<Statement> stream = stores.flatMap(p -> p.stream(subj, obj, filter));
         if (contexts != null && contexts.length > 0) {
             List<Resource> inContexts = Arrays.asList(contexts);
             stream = stream.filter(s -> inContexts.stream().anyMatch(c -> Objects.equals(c, s.getContext())));

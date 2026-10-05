@@ -13,9 +13,18 @@ import org.eclipse.rdf4j.query.algebra.evaluation.TripleSource;
 public class RoTripleSource implements TripleSource {
 
     private final RoStore store;
+    private final PushedFilter filter;
 
     public RoTripleSource(RoStore store) {
+        this(store, PushedFilter.NONE);
+    }
+
+    /**
+     * @param filter on the objects of every pattern, see {@link PushedFilter}
+     */
+    RoTripleSource(RoStore store, PushedFilter filter) {
         this.store = store;
+        this.filter = filter;
     }
 
     @Override
@@ -25,7 +34,7 @@ public class RoTripleSource implements TripleSource {
         if (pred != null && store.getPredicateStore(pred) == null) {
             return new EmptyIteration<>();
         }
-        return new RoFilteredTripleIterator(store, subj, pred, obj, contexts);
+        return new RoFilteredTripleIterator(store, subj, pred, obj, contexts, filter);
     }
 
     @Override

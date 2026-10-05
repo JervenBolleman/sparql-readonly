@@ -51,8 +51,8 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     private static final int SCAN_BATCH_SIZE = 64 * 1024;
     private static final int LOOKUP_BATCH_SIZE = 4096;
 
-    protected static final String SUBJECT = "subject";
-    protected static final String OBJECT = "object";
+    public static final String SUBJECT = "subject";
+    public static final String OBJECT = "object";
     /**
      * Every list stores the long ids of its subjects and objects.
      */
@@ -209,9 +209,17 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
      * {@link #objectKind()}
      */
     public Stream<Statement> stream(Term subject, Term object) {
-        FilterPredicate filter = null;
+        return stream(subject, object, null);
+    }
+
+    /**
+     * @param objects a further condition on the object column, null for none
+     */
+    public Stream<Statement> stream(Term subject, Term object, FilterPredicate objects) {
+        FilterPredicate filter = objects;
         if (subject != null) {
-            filter = FilterPredicate.eq(SUBJECT, subject.id());
+            FilterPredicate onSubject = FilterPredicate.eq(SUBJECT, subject.id());
+            filter = filter == null ? onSubject : FilterPredicate.and(filter, onSubject);
         }
         if (object != null) {
             FilterPredicate onObject = FilterPredicate.eq(OBJECT, object.id());
