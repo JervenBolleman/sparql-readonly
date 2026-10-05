@@ -17,8 +17,9 @@ import dev.hardwood.schema.FileSchema;
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 
 /**
- * Writes a triple list sorted by subject, then object, so that statistics let
- * a lookup of a subject skip all but the row groups that hold it.
+ * Writes a triple list sorted by subject, then object, or by object, then
+ * subject, so that statistics let a lookup of a subject, or of an object,
+ * skip all but the row groups that hold it.
  *
  * <p>
  * Triples are buffered in memory, up to {@link #RUN_TRIPLES}. A full buffer
@@ -58,23 +59,26 @@ final class SortedTripleWriter {
     private final File file;
     private final Hardwood hardwood;
     private final int runTriples;
+    private final boolean byObject;
     private long[] subjects;
     private long[] objects;
     private int[] contexts;
     private int size;
     private final List<File> runs = new ArrayList<>();
 
-    SortedTripleWriter(File file, Hardwood hardwood) {
-        this(file, hardwood, RUN_TRIPLES);
+    SortedTripleWriter(File file, Hardwood hardwood, boolean byObject) {
+        this(file, hardwood, RUN_TRIPLES, byObject);
     }
 
     /**
      * @param runTriples the triples buffered before a run is written
+     * @param byObject sort by object first, otherwise by subject first
      */
-    SortedTripleWriter(File file, Hardwood hardwood, int runTriples) {
+    SortedTripleWriter(File file, Hardwood hardwood, int runTriples, boolean byObject) {
         this.file = file;
         this.hardwood = hardwood;
         this.runTriples = runTriples;
+        this.byObject = byObject;
     }
 
     /**
@@ -173,7 +177,7 @@ final class SortedTripleWriter {
     private void merge(List<File> inputs, Output out, ContextRows contextRows) throws IOException {
         List<RunCursor> cursors = new ArrayList<>();
         try {
-            PriorityQueue<RunCursor> queue = new PriorityQueue<>(inputs.size(), SortedTripleWriter::compare);
+            PriorityQueue<RunCursor> queue = new PriorityQueue<>(inputs.size(), this::compare);
             for (File input : inputs) {
                 RunCursor cursor = new RunCursor(input);
                 cursors.add(cursor);
@@ -202,10 +206,10 @@ final class SortedTripleWriter {
         }
     }
 
-    private static int compare(RunCursor a, RunCursor b) {
-        int c = Long.compare(a.subject, b.subject);
+    private int compare(RunCursor a, RunCursor b) {
+        int c = byObject ? Long.compare(a.object, b.object) : Long.compare(a.subject, b.subject);
         if (c == 0) {
-            c = Long.compare(a.object, b.object);
+            c = byObject ? Long.compare(a.subject, b.subject) : Long.compare(a.object, b.object);
         }
         return c == 0 ? Integer.compare(a.context, b.context) : c;
     }
@@ -215,9 +219,11 @@ final class SortedTripleWriter {
     }
 
     private int compareAt(int i, int j) {
-        int c = Long.compare(subjects[i], subjects[j]);
+        long[] first = byObject ? objects : subjects;
+        long[] second = byObject ? subjects : objects;
+        int c = Long.compare(first[i], first[j]);
         if (c == 0) {
-            c = Long.compare(objects[i], objects[j]);
+            c = Long.compare(second[i], second[j]);
         }
         return c == 0 ? Integer.compare(contexts[i], contexts[j]) : c;
     }

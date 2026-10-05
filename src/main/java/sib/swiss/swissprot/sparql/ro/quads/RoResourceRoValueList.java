@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.stream.Stream;
@@ -64,6 +65,10 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap;
     protected final RoIri predicate;
     protected final ParquetTable triples;
+    /**
+     * The same triples sorted by object, for lookups of objects.
+     */
+    private final ParquetTable byObject;
 
     protected final RoDictionaries dictionaries;
 
@@ -84,12 +89,18 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         this.iriGraphsMap = iriGraphsMap;
         this.bNodeGraphsMap = bNodeGraphsMap;
         this.triples = ParquetTable.open(hardwood, file);
+        this.byObject = ParquetTable.open(hardwood, byObjectFile(file));
         this.dictionaries = dictionaries;
     }
 
     @Override
     public void close() throws IOException {
         triples.close();
+        byObject.close();
+    }
+
+    static File byObjectFile(File file) {
+        return new File(file.getParentFile(), file.getName() + "-by-object");
     }
 
     protected static File getIriGraphsFile(File file) {
@@ -228,7 +239,9 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (filter == null) {
             return stream();
         }
-        Iterator<Statement> iterator = triples.columns(filter, LOOKUP_BATCH_SIZE, SUBJECT, OBJECT)
+        // sorted on the column that is filtered, so that statistics skip
+        ParquetTable table = subject == null && !byObject.isEmpty() ? byObject : triples;
+        Iterator<Statement> iterator = table.columns(filter, LOOKUP_BATCH_SIZE, SUBJECT, OBJECT)
                 .<Iterator<Statement>>map(this::newIterator)
                 .orElseGet(Collections::emptyIterator);
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
@@ -259,7 +272,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             this.predicate = predicate;
             this.dictionaries = dictionaries;
             this.hardwood = hardwood;
-            this.triples = new SortedTripleWriter(file, hardwood);
+            this.triples = new SortedTripleWriter(file, hardwood, false);
         }
 
         protected RoaringBitmap bitmapForContext(final RoResource context) {
@@ -344,10 +357,35 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         }
 
         /**
+         * Writes the copy of the list sorted by object, from the list. It
+         * has no contexts: those are read from the list.
+         */
+        private void writeByObject() throws IOException {
+            SortedTripleWriter sorted = new SortedTripleWriter(byObjectFile(file), hardwood, true);
+            try (ParquetTable list = ParquetTable.open(hardwood, file)) {
+                Optional<ColumnReaders> batches = list.columns(SCAN_BATCH_SIZE, SUBJECT, OBJECT);
+                if (batches.isPresent()) {
+                    try (ColumnReaders rows = batches.get()) {
+                        while (rows.nextBatch()) {
+                            long[] subjects = rows.getColumnReader(SUBJECT).getLongs();
+                            long[] objects = rows.getColumnReader(OBJECT).getLongs();
+                            for (int i = 0; i < subjects.length; i++) {
+                                sorted.add(subjects[i], objects[i], SortedTripleWriter.NO_CONTEXT);
+                            }
+                        }
+                    }
+                }
+            }
+            sorted.finish((context, row) -> {
+            });
+        }
+
+        /**
          * Writes the list sorted by subject and the rows of each context.
          */
         protected void save() throws IOException {
             triples.finish((context, row) -> bitmapForContext(contexts.get(context)).add((int) row));
+            writeByObject();
             saveContextBitmaps();
             saveNamespace(dictionaries.getIriDict().getNamespaces(), file);
         }

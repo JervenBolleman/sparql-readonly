@@ -35,12 +35,18 @@ public class SortedTripleWriterTest {
 
     @Test
     public void inMemory() throws IOException {
-        check(1_000_000, 5_000);
+        check(1_000_000, 5_000, false);
     }
 
     @Test
     public void runsMergedOnce() throws IOException {
-        check(500, 5_000);
+        check(500, 5_000, false);
+    }
+
+    @Test
+    public void byObject() throws IOException {
+        check(1_000_000, 5_000, true);
+        check(20, 5_000, true);
     }
 
     /**
@@ -48,14 +54,14 @@ public class SortedTripleWriterTest {
      */
     @Test
     public void runsMergedTwice() throws IOException {
-        check(20, 5_000);
+        check(20, 5_000, false);
     }
 
     @Test
     public void emptyListHasNoFile() throws IOException {
         File file = new File(folder.getRoot(), "list");
         assertTrue(file.createNewFile());
-        SortedTripleWriter writer = new SortedTripleWriter(file, hardwood);
+        SortedTripleWriter writer = new SortedTripleWriter(file, hardwood, false);
         assertEquals(0, writer.finish((context, row) -> {
         }));
         assertFalse(file.exists());
@@ -66,12 +72,13 @@ public class SortedTripleWriterTest {
      * holds each distinct triple once, sorted, and that the context rows
      * point at the triples of the context.
      */
-    private void check(int runTriples, int triples) throws IOException {
-        File file = new File(folder.getRoot(), "list-" + runTriples);
-        SortedTripleWriter writer = new SortedTripleWriter(file, hardwood, runTriples);
+    private void check(int runTriples, int triples, boolean byObject) throws IOException {
+        File file = new File(folder.getRoot(), "list-" + runTriples + (byObject ? "-o" : "-s"));
+        SortedTripleWriter writer = new SortedTripleWriter(file, hardwood, runTriples, byObject);
         Random random = new Random(runTriples);
+        int[] order = byObject ? new int[]{1, 0, 2} : new int[]{0, 1, 2};
         TreeSet<long[]> expected = new TreeSet<>((a, b) -> {
-            for (int i = 0; i < 3; i++) {
+            for (int i : order) {
                 int c = Long.compare(a[i], b[i]);
                 if (c != 0) {
                     return c;
@@ -107,6 +114,6 @@ public class SortedTripleWriterTest {
             assertEquals("row " + i, java.util.Arrays.toString(expectedRows.get(i)), java.util.Arrays.toString(rows.get(i)));
         }
         // no runs left behind
-        assertEquals(1, folder.getRoot().listFiles(f -> f.getName().startsWith(file.getName())).length);
+        assertEquals(0, folder.getRoot().listFiles(f -> f.getName().startsWith(file.getName() + ".run")).length);
     }
 }
