@@ -8,6 +8,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Random;
 
@@ -32,16 +34,54 @@ import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 /**
  * Stars of patterns on one subject give the same answers as RDF4J's
- * MemoryStore, whichever way {@link StarJoinStep} evaluates them.
+ * MemoryStore, whichever way {@link StarJoinStep} evaluates them, with the
+ * triple lists as they are and merged into wide tables.
  */
+@RunWith(Parameterized.class)
 public class StarJoinTest {
+
+    @Parameters(name = "overlap {0}")
+    public static List<Object[]> overlaps() {
+        // 90: these lists overlap too little to merge; 0: all are merged
+        return List.of(new Object[]{90}, new Object[]{0});
+    }
+
+    private static final Map<Integer, Repository> STORES = new HashMap<>();
+    private static File data;
+    private final int overlap;
+    private Repository ro;
+
+    public StarJoinTest(int overlap) {
+        this.overlap = overlap;
+    }
+
+    @Before
+    public void open() throws IOException {
+        ro = STORES.get(overlap);
+        if (ro == null) {
+            RoStore store = new RoStore();
+            File dir = folder.newFolder("store-" + overlap);
+            store.setDataDir(dir);
+            store.setWideTableOverlap(overlap);
+            store.init();
+            store.load(data);
+            ro = new SailRepository(store);
+            STORES.put(overlap, ro);
+            String[] wide = new File(dir, "wideTables").list();
+            assertEquals("wide tables with overlap " + overlap, overlap == 0, wide != null && wide.length > 0);
+        }
+    }
 
     private static final ValueFactory VF = SimpleValueFactory.getInstance();
     private static final String EX = "http://example.org/";
@@ -49,7 +89,6 @@ public class StarJoinTest {
 
     @ClassRule
     public static TemporaryFolder folder = new TemporaryFolder();
-    private static Repository ro;
     private static Repository reference;
 
     @BeforeClass
@@ -88,17 +127,13 @@ public class StarJoinTest {
             }
         }
         File file = folder.newFile("data.nt");
+        data = file;
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();
             statements.forEach(writer::handleStatement);
             writer.endRDF();
         }
-        RoStore store = new RoStore();
-        store.setDataDir(folder.newFolder("store"));
-        store.init();
-        store.load(file);
-        ro = new SailRepository(store);
         reference = new SailRepository(new MemoryStore());
         try (RepositoryConnection connection = reference.getConnection()) {
             connection.add(file, RDFFormat.NTRIPLES);
@@ -111,7 +146,8 @@ public class StarJoinTest {
 
     @AfterClass
     public static void shutDown() {
-        ro.shutDown();
+        STORES.values().forEach(Repository::shutDown);
+        STORES.clear();
         reference.shutDown();
     }
 

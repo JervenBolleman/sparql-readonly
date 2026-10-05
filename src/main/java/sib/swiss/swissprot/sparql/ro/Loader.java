@@ -13,7 +13,9 @@ import java.util.Arrays;
  *
  * The system property {@code sparql.ro.loadMemoryMB} sets how much memory
  * the dictionaries may use before they spill to disk, by default a quarter of
- * the heap.
+ * the heap, and {@code sparql.ro.wideTableOverlap} the least overlap in
+ * percent of the subjects of triple lists merged into wide tables, by default
+ * 90.
  */
 public final class Loader {
 
@@ -46,6 +48,10 @@ public final class Loader {
         String loadMemory = System.getProperty("sparql.ro.loadMemoryMB");
         if (loadMemory != null) {
             store.setLoadMemory(Long.parseLong(loadMemory) * 1024 * 1024);
+        }
+        String wideTableOverlap = System.getProperty("sparql.ro.wideTableOverlap");
+        if (wideTableOverlap != null) {
+            store.setWideTableOverlap(Integer.parseInt(wideTableOverlap));
         }
         store.init();
         try {

@@ -1,16 +1,22 @@
 package sib.swiss.swissprot.sparql.ro;
 
+import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import dev.hardwood.reader.ColumnReaders;
+import dev.hardwood.reader.FilterPredicate;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Resource;
@@ -21,6 +27,7 @@ import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 
+import sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList;
 import sib.swiss.swissprot.sparql.ro.values.RoResource;
 
 /**
@@ -158,26 +165,72 @@ final class StarJoinStep implements QueryEvaluationStep {
     }
 
     /**
-     * Reads the triples of a pattern in subject order, a subject at a time.
+     * Triples of one or more patterns in subject order, a subject at a time.
      */
-    private static final class Cursor implements AutoCloseable {
-
-        private final Iterator<Statement> statements;
-        private Statement ahead;
-        private long subject;
-        private final List<Statement> group = new ArrayList<>();
-
-        private Cursor(Iterator<Statement> statements) {
-            this.statements = statements;
-            this.ahead = statements.hasNext() ? statements.next() : null;
-        }
+    private interface Source extends AutoCloseable {
 
         /**
          * Reads the triples of the next subject.
          *
          * @return false if there are none
          */
-        boolean nextSubject() {
+        boolean nextSubject();
+
+        /**
+         * The id of the current subject.
+         */
+        long subject();
+
+        Value subjectValue();
+
+        /**
+         * The indexes of the patterns this source reads.
+         */
+        int[] patterns();
+
+        /**
+         * The objects of the current subject, per pattern of
+         * {@link #patterns()}.
+         */
+        List<List<Value>> objects();
+
+        /**
+         * Moves to the first subject at or after the target.
+         *
+         * @return false if there is none
+         */
+        default boolean seek(long target) {
+            while (subject() < target) {
+                if (!nextSubject()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        void close();
+    }
+
+    /**
+     * Reads one pattern from its triple lists.
+     */
+    private static final class PatternCursor implements Source {
+
+        private final int pattern;
+        private final Iterator<Statement> statements;
+        private Statement ahead;
+        private long subject = Long.MIN_VALUE;
+        private final List<Statement> group = new ArrayList<>();
+
+        private PatternCursor(int pattern, Iterator<Statement> statements) {
+            this.pattern = pattern;
+            this.statements = statements;
+            this.ahead = statements.hasNext() ? statements.next() : null;
+        }
+
+        @Override
+        public boolean nextSubject() {
             group.clear();
             if (ahead == null) {
                 return false;
@@ -190,28 +243,127 @@ final class StarJoinStep implements QueryEvaluationStep {
             return true;
         }
 
-        /**
-         * Moves to the first subject at or after the target.
-         *
-         * @return false if there is none
-         */
-        boolean seek(long target) {
-            while (group.isEmpty() || subject < target) {
-                if (!nextSubject()) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
         private static long id(Statement statement) {
             return ((RoResource) statement.getSubject()).getLongId();
         }
 
         @Override
-        public void close() throws Exception {
+        public long subject() {
+            return subject;
+        }
+
+        @Override
+        public Value subjectValue() {
+            return group.get(0).getSubject();
+        }
+
+        @Override
+        public int[] patterns() {
+            return new int[]{pattern};
+        }
+
+        @Override
+        public List<List<Value>> objects() {
+            return List.of(group.stream().map(Statement::getObject).collect(Collectors.toList()));
+        }
+
+        @Override
+        public void close() {
             if (statements instanceof AutoCloseable closeable) {
-                closeable.close();
+                try {
+                    closeable.close();
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads several patterns whose lists are columns of one wide table: a
+     * row with all those columns present is a subject with an object for
+     * each, already joined.
+     */
+    private static final class WideCursor implements Source {
+
+        private static final int BATCH_SIZE = 64 * 1024;
+
+        private final int[] patterns;
+        private final List<RoResourceRoValueList<?, ?>> lists;
+        private final List<String> columns;
+        private final ColumnReaders batches;
+        private long[] subjects = new long[0];
+        private long[][] objects;
+        private int next = -1;
+
+        /**
+         * @param objects the bound object of each pattern, null if any
+         */
+        private WideCursor(int[] patterns, List<RoResourceRoValueList<?, ?>> lists, List<Term> objects) {
+            this.patterns = patterns;
+            this.lists = lists;
+            this.columns = new ArrayList<>();
+            List<String> projection = new ArrayList<>(List.of(RoResourceRoValueList.SUBJECT));
+            FilterPredicate filter = null;
+            for (int i = 0; i < lists.size(); i++) {
+                String column = lists.get(i).wideColumn().orElseThrow().column();
+                columns.add(column);
+                projection.add(column);
+                FilterPredicate present = objects.get(i) == null
+                        ? FilterPredicate.isNotNull(column)
+                        : FilterPredicate.eq(column, objects.get(i).id());
+                filter = filter == null ? present : FilterPredicate.and(filter, present);
+            }
+            this.batches = lists.get(0).bySubject()
+                    .columns(filter, BATCH_SIZE, projection.toArray(String[]::new))
+                    .orElse(null);
+        }
+
+        @Override
+        public boolean nextSubject() {
+            next++;
+            while (next >= subjects.length) {
+                if (batches == null || !batches.nextBatch()) {
+                    return false;
+                }
+                subjects = batches.getColumnReader(RoResourceRoValueList.SUBJECT).getLongs();
+                objects = new long[columns.size()][];
+                for (int i = 0; i < columns.size(); i++) {
+                    objects[i] = batches.getColumnReader(columns.get(i)).getLongs();
+                }
+                next = 0;
+            }
+            return true;
+        }
+
+        @Override
+        public long subject() {
+            return next < 0 ? Long.MIN_VALUE : subjects[next];
+        }
+
+        @Override
+        public Value subjectValue() {
+            return lists.get(0).subjectOf(subjects[next]);
+        }
+
+        @Override
+        public int[] patterns() {
+            return patterns;
+        }
+
+        @Override
+        public List<List<Value>> objects() {
+            List<List<Value>> values = new ArrayList<>();
+            for (int i = 0; i < lists.size(); i++) {
+                values.add(List.of(lists.get(i).objectOf(objects[i][next])));
+            }
+            return values;
+        }
+
+        @Override
+        public void close() {
+            if (batches != null) {
+                batches.close();
             }
         }
     }
@@ -226,7 +378,7 @@ final class StarJoinStep implements QueryEvaluationStep {
         private final List<Pattern> patterns;
         private final Deque<Term.Kind> kinds = new ArrayDeque<>(List.of(Term.Kind.IRI, Term.Kind.BNODE));
         private final Deque<BindingSet> pending = new ArrayDeque<>();
-        private List<Cursor> cursors = List.of();
+        private List<Source> sources = List.of();
         private boolean done;
 
         private Merge(BindingSet bindings, List<Pattern> patterns) {
@@ -235,17 +387,18 @@ final class StarJoinStep implements QueryEvaluationStep {
         }
 
         /**
-         * Opens cursors for the next kind of subject.
+         * Opens the sources for the next kind of subject: patterns whose only
+         * list is a column of the same wide table are read together.
          *
          * @return false if no kind is left
          */
         private boolean nextKind() {
-            closeCursors();
+            closeSources();
             if (kinds.isEmpty()) {
                 return false;
             }
             Term.Kind kind = kinds.poll();
-            List<Cursor> opened = new ArrayList<>();
+            List<Term> objects = new ArrayList<>();
             for (Pattern pattern : patterns) {
                 Term object = null;
                 if (pattern.object() != null) {
@@ -253,16 +406,44 @@ final class StarJoinStep implements QueryEvaluationStep {
                     if (term.isEmpty()) {
                         // no triple has this object: the star has no rows
                         kinds.clear();
-                        cursors = opened;
                         return false;
                     }
                     object = term.get();
                 }
-                opened.add(new Cursor(pattern.triples().inSubjectOrder(kind, object)));
+                objects.add(object);
             }
-            cursors = opened;
-            for (Cursor cursor : cursors) {
-                if (!cursor.nextSubject()) {
+            Map<File, List<Integer>> byTable = new LinkedHashMap<>();
+            List<RoResourceRoValueList<?, ?>> onlyLists = new ArrayList<>();
+            for (int i = 0; i < patterns.size(); i++) {
+                RoResourceRoValueList<?, ?> list = patterns.get(i).triples().onlyList(kind, objects.get(i)).orElse(null);
+                onlyLists.add(list);
+                if (list != null && list.wideColumn().isPresent()) {
+                    byTable.computeIfAbsent(list.wideColumn().get().table(), t -> new ArrayList<>()).add(i);
+                }
+            }
+            List<Source> opened = new ArrayList<>();
+            boolean[] covered = new boolean[patterns.size()];
+            for (List<Integer> together : byTable.values()) {
+                if (together.size() < 2) {
+                    continue;
+                }
+                List<RoResourceRoValueList<?, ?>> lists = new ArrayList<>();
+                List<Term> bound = new ArrayList<>();
+                for (int i : together) {
+                    lists.add(onlyLists.get(i));
+                    bound.add(objects.get(i));
+                    covered[i] = true;
+                }
+                opened.add(new WideCursor(together.stream().mapToInt(Integer::intValue).toArray(), lists, bound));
+            }
+            for (int i = 0; i < patterns.size(); i++) {
+                if (!covered[i]) {
+                    opened.add(new PatternCursor(i, patterns.get(i).triples().inSubjectOrder(kind, objects.get(i))));
+                }
+            }
+            sources = opened;
+            for (Source source : sources) {
+                if (!source.nextSubject()) {
                     return nextKind();
                 }
             }
@@ -276,16 +457,16 @@ final class StarJoinStep implements QueryEvaluationStep {
          */
         private boolean nextSubject() {
             while (true) {
-                if (cursors.isEmpty() && !nextKind()) {
+                if (sources.isEmpty() && !nextKind()) {
                     return false;
                 }
                 long target = Long.MIN_VALUE;
-                for (Cursor cursor : cursors) {
-                    target = Math.max(target, cursor.subject);
+                for (Source source : sources) {
+                    target = Math.max(target, source.subject());
                 }
                 boolean all = true;
-                for (Cursor cursor : cursors) {
-                    if (!cursor.seek(target)) {
+                for (Source source : sources) {
+                    if (!source.seek(target)) {
                         // this kind is done
                         if (!nextKind()) {
                             return false;
@@ -293,7 +474,7 @@ final class StarJoinStep implements QueryEvaluationStep {
                         all = false;
                         break;
                     }
-                    if (cursor.subject != target) {
+                    if (source.subject() != target) {
                         all = false;
                         break;
                     }
@@ -301,13 +482,17 @@ final class StarJoinStep implements QueryEvaluationStep {
                 if (!all) {
                     continue;
                 }
-                List<List<Value>> objects = new ArrayList<>();
-                for (Cursor cursor : cursors) {
-                    objects.add(cursor.group.stream().map(Statement::getObject).collect(Collectors.toList()));
+                List<List<Value>> objects = new ArrayList<>(Collections.nCopies(patterns.size(), (List<Value>) null));
+                for (Source source : sources) {
+                    int[] covered = source.patterns();
+                    List<List<Value>> found = source.objects();
+                    for (int k = 0; k < covered.length; k++) {
+                        objects.set(covered[k], found.get(k));
+                    }
                 }
-                pending.addAll(combine(bindings, cursors.get(0).group.get(0).getSubject(), patterns, objects));
-                for (Cursor cursor : cursors) {
-                    if (!cursor.nextSubject()) {
+                pending.addAll(combine(bindings, sources.get(0).subjectValue(), patterns, objects));
+                for (Source source : sources) {
+                    if (!source.nextSubject()) {
                         // one pattern has no more subjects of this kind
                         if (!nextKind()) {
                             done = true;
@@ -339,20 +524,16 @@ final class StarJoinStep implements QueryEvaluationStep {
             return pending.poll();
         }
 
-        private void closeCursors() {
-            for (Cursor cursor : cursors) {
-                try {
-                    cursor.close();
-                } catch (Exception e) {
-                    // closing what was read in full or not at all
-                }
+        private void closeSources() {
+            for (Source source : sources) {
+                source.close();
             }
-            cursors = List.of();
+            sources = List.of();
         }
 
         @Override
         public void close() {
-            closeCursors();
+            closeSources();
             kinds.clear();
             done = true;
         }

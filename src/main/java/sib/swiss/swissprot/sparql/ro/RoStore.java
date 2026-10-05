@@ -36,6 +36,7 @@ import org.eclipse.rdf4j.sail.helpers.AbstractSail;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
+import sib.swiss.swissprot.sparql.ro.quads.WideTables;
 import sib.swiss.swissprot.sparql.ro.values.RoBigIntegerLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoBooleanLiteral;
@@ -68,6 +69,11 @@ public class RoStore extends AbstractSail {
 	 * spill to disk.
 	 */
 	private long loadMemory = Runtime.getRuntime().maxMemory() / 4;
+	/**
+	 * The least overlap of subjects, in percent, for triple lists with one
+	 * object per subject to be merged into a wide table.
+	 */
+	private int wideTableOverlap = 90;
 
 	public RoStore() {
 		this.federatedServiceResolver = new SPARQLServiceResolver();
@@ -229,6 +235,17 @@ public class RoStore extends AbstractSail {
 	}
 
 	/**
+	 * @param percent the least overlap of their subjects, |A ∩ B| / |A ∪ B|,
+	 * for triple lists with one object per subject to be merged into one
+	 * wide table, by default 90. 0 merges all such lists whatever their
+	 * subjects; above 100 merges none.
+	 * @see WideTables
+	 */
+	public void setWideTableOverlap(int percent) {
+		this.wideTableOverlap = percent;
+	}
+
+	/**
 	 * Loads the files in one parse. Values get provisional ids, the triples
 	 * are staged with them, and once the dictionaries are sorted and written
 	 * the staged triples are stored with their final ids.
@@ -267,7 +284,10 @@ public class RoStore extends AbstractSail {
 			for (RoPredicateStore.Builder builder : builders) {
 				addPredicateStore(builder.build());
 			}
-			logPhase("Sorted and wrote the triple lists", phase);
+			phase = logPhase("Sorted and wrote the triple lists", phase);
+			WideTables.build(subDataDirs.get(RoDirectories.PREDICATE_LISTS),
+					subDataDirs.get(RoDirectories.WIDE_TABLES), hardwood, wideTableOverlap);
+			logPhase("Merged triple lists into wide tables", phase);
 		} finally {
 			if (stagingFile.exists() && !stagingFile.delete()) {
 				LOGGER.warning("Could not delete " + stagingFile);

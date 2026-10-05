@@ -22,6 +22,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.function.Function;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -66,21 +67,70 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     protected final Map<RoIri, RoaringBitmap> iriGraphsMap;
     protected final Map<RoBnode, RoaringBitmap> bNodeGraphsMap;
     protected final RoIri predicate;
-    protected final ParquetTable triples;
+    /**
+     * The triples sorted by subject: the list's own file, or a column of a
+     * wide table, see {@link WideTables}.
+     */
+    private final ParquetTable bySubject;
+    /**
+     * The object column of {@link #bySubject}.
+     */
+    private final String objectColumn;
+    /**
+     * In a wide table, the rows that have an object in the column; null for
+     * the list's own file.
+     */
+    private final FilterPredicate present;
     /**
      * The same triples sorted by object, for lookups of objects.
      */
     private final ParquetTable byObject;
+    private final WideTables.Column wide;
 
     protected final RoDictionaries dictionaries;
-
-    protected long triplesInFile() {
-        return triples.numberOfRows();
-    }
 
     protected abstract S getSubject(long id);
 
     protected abstract O getObject(long id);
+
+    /**
+     * @return the subject with this id in this list
+     */
+    public S subjectOf(long id) {
+        return getSubject(id);
+    }
+
+    /**
+     * @return the object with this id in this list
+     */
+    public O objectOf(long id) {
+        return getObject(id);
+    }
+
+    /**
+     * @return true if the list has no triples
+     */
+    public boolean isEmpty() {
+        // a wide table also holds the rows of other lists: the copy sorted
+        // by object holds just this list's
+        return wide != null ? byObject.isEmpty() : bySubject.isEmpty();
+    }
+
+    /**
+     * @return the column of this list in a wide table, if it was merged into
+     * one
+     */
+    public Optional<WideTables.Column> wideColumn() {
+        return Optional.ofNullable(wide);
+    }
+
+    /**
+     * @return the table holding this list sorted by subject: its own file or
+     * a wide table, to read several columns of at once
+     */
+    public ParquetTable bySubject() {
+        return bySubject;
+    }
 
     protected RoResourceRoValueList(File file, RoIri predicate,
             Map<RoIri, RoaringBitmap> iriGraphsMap,
@@ -90,14 +140,24 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         this.predicate = predicate;
         this.iriGraphsMap = iriGraphsMap;
         this.bNodeGraphsMap = bNodeGraphsMap;
-        this.triples = ParquetTable.open(hardwood, file);
+        Optional<WideTables.Column> wide = WideTables.columnOf(file);
+        this.wide = wide.orElse(null);
+        if (wide.isPresent()) {
+            this.bySubject = ParquetTable.open(hardwood, wide.get().table());
+            this.objectColumn = wide.get().column();
+            this.present = FilterPredicate.isNotNull(objectColumn);
+        } else {
+            this.bySubject = ParquetTable.open(hardwood, file);
+            this.objectColumn = OBJECT;
+            this.present = null;
+        }
         this.byObject = ParquetTable.open(hardwood, byObjectFile(file));
         this.dictionaries = dictionaries;
     }
 
     @Override
     public void close() throws IOException {
-        triples.close();
+        bySubject.close();
         byObject.close();
     }
 
@@ -184,9 +244,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
 
     @Override
     public Iterator<Statement> iterator() {
-        return triples.columns(SCAN_BATCH_SIZE, SUBJECT, OBJECT)
-                .<Iterator<Statement>>map(this::newIterator)
-                .orElseGet(Collections::emptyIterator);
+        return read(bySubject, objectColumn, present, SCAN_BATCH_SIZE);
     }
 
     /**
@@ -212,27 +270,44 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
     }
 
     /**
-     * @param objects a further condition on the object column, null for none
+     * @param objects a further condition on the object column, given its
+     * name, null for none
      */
-    public Stream<Statement> stream(Term subject, Term object, FilterPredicate objects) {
-        FilterPredicate filter = objects;
-        if (subject != null) {
-            FilterPredicate onSubject = FilterPredicate.eq(SUBJECT, subject.id());
-            filter = filter == null ? onSubject : FilterPredicate.and(filter, onSubject);
-        }
-        if (object != null) {
-            FilterPredicate onObject = FilterPredicate.eq(OBJECT, object.id());
-            filter = filter == null ? onObject : FilterPredicate.and(filter, onObject);
-        }
-        if (filter == null) {
+    public Stream<Statement> stream(Term subject, Term object, Function<String, FilterPredicate> objects) {
+        if (subject == null && object == null && objects == null) {
             return stream();
         }
         // sorted on the column that is filtered, so that statistics skip
-        ParquetTable table = subject == null && !byObject.isEmpty() ? byObject : triples;
-        Iterator<Statement> iterator = table.columns(filter, LOOKUP_BATCH_SIZE, SUBJECT, OBJECT)
-                .<Iterator<Statement>>map(this::newIterator)
-                .orElseGet(Collections::emptyIterator);
+        boolean useByObject = subject == null && !byObject.isEmpty();
+        ParquetTable table = useByObject ? byObject : bySubject;
+        String column = useByObject ? OBJECT : objectColumn;
+        FilterPredicate filter = useByObject ? null : present;
+        if (objects != null) {
+            filter = and(filter, objects.apply(column));
+        }
+        if (subject != null) {
+            filter = and(filter, FilterPredicate.eq(SUBJECT, subject.id()));
+        }
+        if (object != null) {
+            filter = and(filter, FilterPredicate.eq(column, object.id()));
+        }
+        Iterator<Statement> iterator = read(table, column, filter, LOOKUP_BATCH_SIZE);
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
+    }
+
+    private static FilterPredicate and(FilterPredicate left, FilterPredicate right) {
+        return left == null ? right : right == null ? left : FilterPredicate.and(left, right);
+    }
+
+    /**
+     * Reads the subject and object columns of a table, the rows matching the
+     * filter if there is one.
+     */
+    private Iterator<Statement> read(ParquetTable table, String column, FilterPredicate filter, int batchSize) {
+        Optional<ColumnReaders> batches = filter == null
+                ? table.columns(batchSize, SUBJECT, column)
+                : table.columns(filter, batchSize, SUBJECT, column);
+        return batches.<Iterator<Statement>>map(this::newIterator).orElseGet(Collections::emptyIterator);
     }
 
     /**
@@ -245,9 +320,8 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         if (object == null) {
             return iterator();
         }
-        return triples.columns(FilterPredicate.eq(OBJECT, object.id()), SCAN_BATCH_SIZE, SUBJECT, OBJECT)
-                .<Iterator<Statement>>map(this::newIterator)
-                .orElseGet(Collections::emptyIterator);
+        return read(bySubject, objectColumn, and(present, FilterPredicate.eq(objectColumn, object.id())),
+                SCAN_BATCH_SIZE);
     }
 
 
@@ -422,8 +496,10 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         public boolean hasNext() {
             while (open && (subjects == null || next == subjects.length)) {
                 if (batches.nextBatch()) {
-                    subjects = batches.getColumnReader(SUBJECT).getLongs();
-                    objects = batches.getColumnReader(OBJECT).getLongs();
+                    // the subject column comes first in every file, the
+                    // object column second, whatever its name
+                    subjects = batches.getColumnReader(0).getLongs();
+                    objects = batches.getColumnReader(1).getLongs();
                     next = 0;
                 } else {
                     batches.close();

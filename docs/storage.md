@@ -20,12 +20,14 @@ flowchart LR
     store --> other["otherValueDictionaries/"]
     store --> num["numberDictionaries/"]
     store --> lists["predicateLists/"]
+    store --> wide["wideTables/"]
     ns --> nsfile["iri-namespaces<br/><i>Parquet, one row per IRI namespace</i>"]
     ns --> prefixes["prefixes<br/><i>text, prefixes declared in the data</i>"]
     iri --> iris["iris<br/><i>Parquet, the local names of<br/>all namespaces of names</i>"]
     other --> literals["literals<br/><i>Parquet, all literals</i>"]
     num --> integers["integer_dict<br/><i>Parquet, big integers</i>"]
     lists --> pred["#lt;URL-encoded predicate IRI#gt;/<br/><i>one per predicate, see below</i>"]
+    wide --> table["table-#lt;n#gt;<br/><i>Parquet, triple lists merged<br/>on their subjects, see below</i>"]
 ```
 
 A directory or file that would be empty is not there: a store without big
@@ -41,6 +43,7 @@ flowchart LR
     pred --> list["#lt;list#gt;<br/><i>Parquet: triples sorted by subject</i>"]
     pred --> byobj["#lt;list#gt;-by-object<br/><i>Parquet: the same triples, sorted by object</i>"]
     pred --> graphs["#lt;list#gt;-graphs<br/><i>rows of #lt;list#gt; per named graph,<br/>only if it has triples in one</i>"]
+    pred --> widefile["#lt;list#gt;-wide<br/><i>text: the wide table and column<br/>that replace #lt;list#gt;</i>"]
 ```
 
 ### Triple lists
@@ -62,6 +65,33 @@ lookup skip all but the row group that holds its value.
 A `-graphs` file holds the number of named graphs, then per graph whether
 it is an IRI, its id and a serialized `RoaringBitmap` of the rows of the list
 in that graph.
+
+### Wide tables
+
+Lists with one object per subject, and no named graphs, whose subjects
+largely overlap are merged into one wide table: a `subject` column and one
+`INT64` column of objects per list, `p0`, `p1`, …, null where a subject has
+no triple in that list. The subjects, otherwise stored in each of these
+lists, are stored once. A merged list keeps its `-by-object` copy; its file
+sorted by subject is replaced by `<list>-wide`, a line with the table's path
+relative to the predicate directory, a tab, and the column.
+
+Which lists are merged is set by `RoStore.setWideTableOverlap(percent)`, or
+`-Dsparql.ro.wideTableOverlap` for `Loader`, default 90. Lists are taken
+from the most triples to the fewest; each joins the table, of lists with
+the same kind of subject, whose subjects it overlaps most, if
+|A ∩ B| / |A ∪ B| is at least the setting, or starts a table of its own. A
+table needs two lists. At 0 every such list with IRI subjects ends up in one
+table, and those with blank node subjects in another; above 100 nothing is
+merged.
+
+On the taxonomy store:
+
+| Overlap | Tables | Lists merged | Store |
+| --- | --- | --- | --- |
+| none (101) | 0 | 0 | 100 MiB, 67 files |
+| 90 | 2: `type` + `partOfLineage`, `scientificName` + `subClassOf` | 4 | 95 MiB, 69 files |
+| 0 | 1 | 11 | 90 MiB, 68 files |
 
 ### Dictionaries
 
@@ -148,11 +178,25 @@ are evaluated together (`StarJoinOptimizer`, `StarJoinStep`):
   are looked up in the other patterns;
 - otherwise the lists of all patterns, sorted by subject, are read once and
   merged, with bound objects as filters on those lists: a subject every
-  pattern has gives the combinations of its objects.
+  pattern has gives the combinations of its objects. Patterns whose list
+  is a column of the same wide table are read together, as one pass over
+  that table with a filter that their columns are not null (or equal to
+  the bound object): each row is already a subject with all their objects.
 
 On the taxonomy store all 1.9 million species with their name and parent
 take 4 s; one lookup per pattern per species, as a nested loop join does,
 takes about 8.5 ms per row, hours in all.
+
+Counting the 2.1 million taxa with a name, rank, parent and lineage flag:
+
+| Overlap | Time |
+| --- | --- |
+| none | 3.9 s |
+| 90 (`rank` not merged) | 3.3 s |
+| 0 (all four in one table) | 2.5 s |
+
+Most of what is left is building RDF4J binding sets, not reading the
+store.
 
 ## What the store consists of
 
@@ -195,7 +239,10 @@ What is still duplicated:
   of one row group, 64k triples or less, it gains nothing: 12 of the 21
   taxonomy lists, though only 1.2 MB of the 34. These could skip it, as
   could lists with a single distinct object.
-- **The same subjects in the lists of several predicates,** see TODO item 7.
+- **The same subjects in the lists of several predicates,** for lists with
+  one object per subject, is removed by the wide tables, as far as their
+  overlap setting allows. Lists with several objects per subject still
+  each store their subjects.
 - `bnode_string` lists are never filled: loading puts blank node subjects
   with literal objects in `bnode_literal`.
 

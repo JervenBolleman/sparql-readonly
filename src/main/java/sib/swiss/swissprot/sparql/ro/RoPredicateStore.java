@@ -237,6 +237,25 @@ public class RoPredicateStore implements Iterable<Statement>, Closeable {
     }
 
     /**
+     * @return the list holding all triples of this predicate with subjects
+     * of the kind and, if given, objects of the kind of the object; empty if
+     * these are in several lists
+     */
+    public Optional<RoResourceRoValueList<?, ?>> onlyList(Term.Kind subjectKind, Term object) {
+        RoResourceRoValueList<?, ?> only = null;
+        for (RoResourceRoValueList<?, ?> list : lists()) {
+            if (list.subjectKind() == subjectKind && (object == null || list.objectKind() == object.kind())
+                    && !list.isEmpty()) {
+                if (only != null) {
+                    return Optional.empty();
+                }
+                only = list;
+            }
+        }
+        return Optional.ofNullable(only);
+    }
+
+    /**
      * The triples of this predicate with subjects of one kind, in the order
      * of their subject ids, for a merge on subjects.
      *

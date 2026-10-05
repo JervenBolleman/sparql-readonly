@@ -17,6 +17,7 @@ or from code:
 RoStore store = new RoStore();
 store.setDataDir(directory);
 store.setLoadMemory(64L << 20);   // optional, see "Memory"
+store.setWideTableOverlap(90);     // optional, see "5. Wide tables"
 store.init();
 store.load(files);
 ```
@@ -47,6 +48,8 @@ flowchart TD
     staged --> remap
     remap -->|"(subject, object, context)<br/>per predicate and type"| sort["4. Sort and write<br/>SortedTripleWriter"]
     sort --> lists[("predicateLists/<br/>sorted by subject<br/>and by object")]
+    lists -->|"1:1 lists that<br/>overlap enough"| wide["5. Wide tables<br/>WideTables.build"]
+    wide --> tables[("wideTables/")]
 ```
 
 ### 1. Parse and stage
@@ -122,6 +125,15 @@ recorded in a bitmap per graph.
 
 The list is then read back and written again sorted by object, then
 subject, as the list's `-by-object` copy.
+
+### 5. Wide tables
+
+The lists with one object per subject and no named graphs are read for
+their subjects, grouped by how much their subjects overlap, and each group
+of two or more is written as a wide table in `wideTables/`
+(`WideTables.build`). The lists of a group are then replaced by a pointer
+to their column. See "Wide tables" in [storage.md](storage.md) for the
+grouping and the `wideTableOverlap` setting.
 
 Finally the staging file, the spill directory and all runs are deleted,
 the prefixes declared in the files are written to `namespaces/prefixes`, and

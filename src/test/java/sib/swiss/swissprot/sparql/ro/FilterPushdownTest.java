@@ -11,6 +11,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -36,16 +37,50 @@ import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 /**
  * FILTERs pushed into the triple lists must not change any answer: every
  * query is compared with RDF4J's own MemoryStore holding the same data.
  */
+@RunWith(Parameterized.class)
 public class FilterPushdownTest {
+
+    @Parameters(name = "overlap {0}")
+    public static List<Object[]> overlaps() {
+        // 0: the lists of the objects of each kind become columns of a wide table
+        return List.of(new Object[]{90}, new Object[]{0});
+    }
+
+    private static final Map<Integer, Repository> STORES = new HashMap<>();
+    private static File data;
+    private final int overlap;
+    private Repository ro;
+
+    public FilterPushdownTest(int overlap) {
+        this.overlap = overlap;
+    }
+
+    @Before
+    public void open() throws IOException {
+        ro = STORES.get(overlap);
+        if (ro == null) {
+            RoStore store = new RoStore();
+            store.setDataDir(folder.newFolder("store-" + overlap));
+            store.setWideTableOverlap(overlap);
+            store.init();
+            store.load(data);
+            ro = new SailRepository(store);
+            STORES.put(overlap, ro);
+        }
+    }
 
     private static final ValueFactory VF = SimpleValueFactory.getInstance();
     private static final String EX = "http://example.org/";
@@ -53,7 +88,6 @@ public class FilterPushdownTest {
 
     @ClassRule
     public static TemporaryFolder folder = new TemporaryFolder();
-    private static Repository ro;
     private static Repository reference;
 
     @BeforeClass
@@ -89,11 +123,7 @@ public class FilterPushdownTest {
             statements.forEach(writer::handleStatement);
             writer.endRDF();
         }
-        RoStore store = new RoStore();
-        store.setDataDir(folder.newFolder("store"));
-        store.init();
-        store.load(file);
-        ro = new SailRepository(store);
+        data = file;
         reference = new SailRepository(new MemoryStore());
         try (RepositoryConnection connection = reference.getConnection()) {
             connection.add(file, RDFFormat.NTRIPLES);
@@ -102,7 +132,8 @@ public class FilterPushdownTest {
 
     @AfterClass
     public static void shutDown() {
-        ro.shutDown();
+        STORES.values().forEach(Repository::shutDown);
+        STORES.clear();
         reference.shutDown();
     }
 

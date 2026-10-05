@@ -2,6 +2,8 @@ package sib.swiss.swissprot.sparql.ro;
 
 import java.math.BigInteger;
 import java.util.Arrays;
+import java.util.function.Function;
+
 import dev.hardwood.reader.FilterPredicate;
 
 import sib.swiss.swissprot.sparql.ro.quads.RoResourceRoValueList;
@@ -36,14 +38,15 @@ public record PushedFilter(BigInteger lower, BigInteger upper, long[] integers, 
      * How a triple list is to be read.
      *
      * @param read false if no triple of the list can pass
-     * @param objects the condition on the object column, null for none
+     * @param objects the condition on the object column, given its name, null
+     * for none
      */
-    public record ListRead(boolean read, FilterPredicate objects) {
+    public record ListRead(boolean read, Function<String, FilterPredicate> objects) {
 
         static final ListRead SKIP = new ListRead(false, null);
         static final ListRead ALL = new ListRead(true, null);
 
-        static ListRead where(FilterPredicate objects) {
+        static ListRead where(Function<String, FilterPredicate> objects) {
             return new ListRead(true, objects);
         }
     }
@@ -93,7 +96,7 @@ public record PushedFilter(BigInteger lower, BigInteger upper, long[] integers, 
         }
         if (bool != null) {
             return switch (kind) {
-                case BOOLEAN -> ListRead.where(FilterPredicate.eq(RoResourceRoValueList.OBJECT, bool ? 1L : 0L));
+                case BOOLEAN -> ListRead.where(column -> FilterPredicate.eq(column, bool ? 1L : 0L));
                 // a boolean that is not valid for its datatype is a literal
                 case LITERAL -> ListRead.ALL;
                 default -> ListRead.SKIP;
@@ -109,18 +112,20 @@ public record PushedFilter(BigInteger lower, BigInteger upper, long[] integers, 
      * dictionary, negative longs, which are always read
      */
     private ListRead inline(boolean dictionaryIds) {
-        FilterPredicate values = values();
         if (dictionaryIds) {
-            FilterPredicate inDictionary = FilterPredicate.lt(RoResourceRoValueList.OBJECT, 0L);
-            return ListRead.where(values == null ? inDictionary : FilterPredicate.or(values, inDictionary));
+            return ListRead.where(column -> {
+                FilterPredicate values = values(column);
+                FilterPredicate inDictionary = FilterPredicate.lt(column, 0L);
+                return values == null ? inDictionary : FilterPredicate.or(values, inDictionary);
+            });
         }
-        return values == null ? ListRead.SKIP : ListRead.where(values);
+        return values(RoResourceRoValueList.OBJECT) == null ? ListRead.SKIP : ListRead.where(this::values);
     }
 
     /**
      * @return the condition on integer values, null if none passes
      */
-    private FilterPredicate values() {
+    private FilterPredicate values(String column) {
         BigInteger min = BigInteger.valueOf(Long.MIN_VALUE);
         BigInteger max = BigInteger.valueOf(Long.MAX_VALUE);
         BigInteger l = lower == null ? min : lower.max(min);
@@ -132,9 +137,9 @@ public record PushedFilter(BigInteger lower, BigInteger upper, long[] integers, 
             long[] inRange = Arrays.stream(integers)
                     .filter(v -> BigInteger.valueOf(v).compareTo(l) >= 0 && BigInteger.valueOf(v).compareTo(u) <= 0)
                     .toArray();
-            return inRange.length == 0 ? null : FilterPredicate.in(RoResourceRoValueList.OBJECT, inRange);
+            return inRange.length == 0 ? null : FilterPredicate.in(column, inRange);
         }
-        return FilterPredicate.and(FilterPredicate.gtEq(RoResourceRoValueList.OBJECT, l.longValue()),
-                FilterPredicate.ltEq(RoResourceRoValueList.OBJECT, u.longValue()));
+        return FilterPredicate.and(FilterPredicate.gtEq(column, l.longValue()),
+                FilterPredicate.ltEq(column, u.longValue()));
     }
 }
