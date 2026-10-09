@@ -15,7 +15,7 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 
 import sib.swiss.swissprot.sparql.ro.dictionaries.HashIndex;
-import sib.swiss.swissprot.sparql.ro.dictionaries.LinearValues;
+import sib.swiss.swissprot.sparql.ro.dictionaries.CompressedValues;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoLiteralDict;
 
 public class TempLiteralDictionary extends TempDictionary {
@@ -71,7 +71,8 @@ public class TempLiteralDictionary extends TempDictionary {
 
     /**
      * Writes all literals into one dictionary, sorted per group, and its
-     * index. The id of a literal is the offset of its label.
+     * index. The id of a literal is that of its label in the compressed
+     * labels, see {@link CompressedValues}.
      */
     public RoLiteralDict load() throws IOException {
         File labels = new File(out, RoLiteralDict.PATH_NAME);
@@ -89,19 +90,20 @@ public class TempLiteralDictionary extends TempDictionary {
             values += group.provisionalIds();
         }
         List<RoLiteralDict.Group> written = new ArrayList<>();
-        try (LinearValues.Writer writer = new LinearValues.Writer(labels);
-                HashIndex.Writer hashes = new HashIndex.Writer(index, values)) {
+        // the hash of a label is of its group too: the index of the group
+        final long[] groupIndex = new long[1];
+        try (HashIndex.Writer hashes = new HashIndex.Writer(index, values);
+                CompressedValues.Writer writer = new CompressedValues.Writer(labels,
+                        (label, id) -> hashes.add(HashIndex.hash(label, groupIndex[0]), id))) {
             for (ProvisionalGroup<String> group : groups) {
                 Literal example = exampleOfGroup.get(group.index());
-                final long groupIndex = written.size();
+                groupIndex[0] = written.size();
                 written.add(new RoLiteralDict.Group(writer.position(), example.getDatatype(),
                         example.getLanguage().orElse(null)));
-                group.finish(label -> {
-                    byte[] bytes = label.getBytes(StandardCharsets.UTF_8);
-                    long offset = writer.add(bytes);
-                    hashes.add(HashIndex.hash(bytes, groupIndex), offset);
-                    return offset;
-                });
+                // the index of a label in the group, its id once written
+                group.finish(label -> writer.add(label.getBytes(StandardCharsets.UTF_8)));
+                CompressedValues.Ids ids = writer.endGroup();
+                group.mapFinalIds(ids::id);
             }
         }
         RoLiteralDict.writeGroups(groupsFile, written);

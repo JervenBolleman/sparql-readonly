@@ -12,14 +12,14 @@ import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 /**
  * The local names of one namespace, sorted, one after the other in the file
- * of local names all such namespaces share, see {@link LinearValues}. The
- * local id of a name is its offset from the first name of the namespace.
+ * of compressed local names all such namespaces share, see
+ * {@link CompressedValues}. The local id of a name is its id there, less the
+ * id where the names of the namespace start.
  */
 public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 
-	private static final int BITS_IN_A_LONG = Long.BYTES * 8;
 
-	private final LinearValues iris;
+	private final CompressedValues iris;
 	private final HashIndex index;
 	private final RoNamespace roNamespace;
 	private final RoIriDictionary roIriDictionary;
@@ -32,7 +32,7 @@ public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 	 * @param start the offset of the first name of the namespace
 	 * @param end the offset after its last name
 	 */
-	public BasicRoIriNamespaceDictionary(LinearValues iris, HashIndex index, RoNamespace roNamespace, long start,
+	public BasicRoIriNamespaceDictionary(CompressedValues iris, HashIndex index, RoNamespace roNamespace, long start,
 			long end, RoIriDictionary roIriDictionary) {
 		this.iris = iris;
 		this.index = index;
@@ -44,14 +44,14 @@ public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 
 	@Override
 	public Optional<String> getLocalNameFromId(long id) {
-		if ((id >>> (BITS_IN_A_LONG - RoNamespaces.BITS_FOR_NAMESPACES)) != roNamespace.getId()) {
+		if (RoNamespaces.namespaceOf(id) != roNamespace.getId()) {
 			return Optional.empty();
 		}
-		long offset = start + (id & 0xFFFF_FFFFL);
-		if (offset >= end) {
+		long name = CompressedValues.idAt(start) + RoNamespaces.localOf(id);
+		if (name >= CompressedValues.idAt(end)) {
 			return Optional.empty();
 		}
-		return Optional.of(iris.string(offset));
+		return Optional.of(iris.string(name));
 	}
 
 	@Override
@@ -70,16 +70,18 @@ public class BasicRoIriNamespaceDictionary implements RoIriNamespaceDictionary {
 			return Optional.empty();
 		}
 		byte[] localName = RoIriDictionary.storedLocalName(iri).getBytes(StandardCharsets.UTF_8);
-		long offset = index.find(HashIndex.hash(localName, roNamespace.getId()),
-				at -> at >= start && at < end && iris.equalsAt(at, localName));
-		if (offset < 0) {
+		long first = CompressedValues.idAt(start);
+		long last = CompressedValues.idAt(end);
+		long name = index.find(HashIndex.hash(localName, roNamespace.getId()),
+				at -> at >= first && at < last && iris.equalsAt(at, localName));
+		if (name < 0) {
 			return Optional.empty();
 		}
-		return Optional.of(new RoIri(nameSpacedId(offset - start), roIriDictionary, iri));
+		return Optional.of(new RoIri(nameSpacedId(name - first), roIriDictionary, iri));
 	}
 
 	private long nameSpacedId(long id) {
-		return id | (roNamespace.getId() << RoNamespaces.BITS_FOR_NAMESPACES);
+		return RoNamespaces.iriId(roNamespace.getId(), id);
 	}
 
 	@Override

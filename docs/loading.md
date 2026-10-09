@@ -101,16 +101,20 @@ memory into one sorted stream of distinct values. Each value is written to
 its dictionary and its final id recorded for every provisional id it got, in
 an array per group (8 bytes per provisional id).
 
-Local names and literal labels are appended to a file of values, and their
-offset is their id; each is also added to the hash index of that file. The
-index is sized from the number of provisional ids, which is at least the
-number of distinct values, before the first value is written, and filled in
-a memory map, so it does not take heap.
+Local names and literal labels are collected per segment of 64 batches of
+128, which is compressed with an FSST symbol table of its own and written
+(`CompressedValues`). Their ids are only known then: the callback of the
+merge returns the index of a value in its group, and once the group is
+written its final ids become `batch offset << 7 | index in the batch`. Each
+value is also added to the hash index of its file, when its segment is
+written. The index is sized from the number of provisional ids, which is at
+least the number of distinct values, before the first value is written, and
+filled in a memory map, so it does not take heap.
 
 | Dictionary | Final id |
 | --- | --- |
-| IRI namespace | `namespace << 32 \| offset of the name from the first name of the namespace`, or `\| number` for a prefix-and-number namespace. Namespaces are numbered largest first; all names go into one file. |
-| literals | the offset of the label in one file holding all groups, each sorted |
+| IRI namespace | `namespace << 40 \| (id of the name less the id where the namespace starts)`, or `\| number` for a prefix-and-number namespace. Namespaces are numbered largest first; all names go into one file. |
+| literals | the id of the label in one file holding all groups, each sorted |
 | big integers | the row, with the high bit set |
 
 ### 3. Remap
@@ -168,19 +172,19 @@ Not bounded by a setting:
 | Step | Default budget |
 | --- | --- |
 | 1. Parse and stage | 72–91 s |
-| 2. Write the dictionaries | 10 s |
+| 2. Write the dictionaries | 19–28 s |
 | 3. Remap | 8 s |
 | 4. Sort and write the triple lists | 14 s |
 | 5. Wide tables | 2 s |
 | Whole load | 110–131 s |
 
 Parsing varies between runs on this machine by about 20 s; the other steps
-by a second or two.
+by a few seconds. Writing the dictionaries took 10 s uncompressed: most of
+the difference is building an FSST symbol table per segment of 8192 values.
 
 With a 64 MB dictionary budget the dictionaries spill 23 runs; parsing then
 takes longer and writing the dictionaries shorter. The resulting store is
-294 MB in 72 files, most of it the uncompressed dictionaries and their
-indexes; see [storage.md](storage.md) for what it holds. Both taxonomy files together, 55.9M triples (53.5M distinct), load
+230 MB in 72 files, most of it the dictionaries and their hash indexes; see [storage.md](storage.md) for what it holds. Both taxonomy files together, 55.9M triples (53.5M distinct), load
 and are counted back in under five minutes in `RoStoreTest`.
 
 ## Bottlenecks

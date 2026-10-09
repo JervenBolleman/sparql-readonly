@@ -20,6 +20,7 @@ import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.buffer.ImmutableRoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
+import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class RoIriPrefixFollowedByNumberDictionary
@@ -162,7 +163,7 @@ public class RoIriPrefixFollowedByNumberDictionary
     }
 
     private long nameSpacedId(long id) {
-        return id | (namespace.getId() << 32);
+        return RoNamespaces.iriId(namespace.getId(), id);
     }
 
     @Override

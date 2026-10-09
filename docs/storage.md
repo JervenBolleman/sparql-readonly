@@ -5,14 +5,14 @@ other, and how reading a statement pattern uses them. This describes what is
 implemented; [loading.md](loading.md) describes how the files are written.
 
 The numbers are from a store of `taxonomy.rdf` (16.5M triples, 21
-predicates): 294 MB on disk in 72 files, see "What the store consists of".
+predicates): 230 MB on disk in 72 files, see "What the store consists of".
 
 ## Layout
 
 The triple lists, the namespaces and the big integers are Parquet, written
 with [hardwood](https://hardwood.dev), compressed with zstd. The local names
-of IRIs and the literals are uncompressed values one after the other, each
-with a hash index, see "Dictionaries". The other files are small binary or
+of IRIs and the literals are compressed with FSST in batches of 128 values,
+each with a hash index, see "Dictionaries". The other files are small binary or
 text files.
 
 ```mermaid
@@ -120,25 +120,48 @@ On the taxonomy store:
 ### Dictionaries
 
 The local names of IRIs and the labels of literals are each in a file of
-values one after the other, uncompressed: per value its length in bytes as
-an unsigned LEB128 varint, then its UTF-8 bytes. The id of a value is its
-offset in the file, so reading a value is reading at that offset, from a
-memory map (`LinearValues`).
+values compressed with [FSST](https://github.com/cwida/fsst), through
+fsst4j (`swiss.sib.swissprot:fsst4j`), which decompresses each
+value on its own (`CompressedValues`). The values are in batches of 128.
+The id of a value is the offset of its batch in the file, shifted left by
+7 bits, plus its index in the batch:
+
+```
+id = batch offset << 7 | index in the batch
+```
+
+Batches come in segments of up to 64 that share an FSST symbol table, built
+from the values of the segment: the table, in FSST's `fsst_export` format,
+then the batches. A group of values, the names of one namespace or the
+labels of one language or datatype, starts a new segment, so a batch holds
+values of one group only, and all batches of a group but its last are
+full. A batch is
+
+| Field | Size |
+| --- | --- |
+| distance back to the symbol table of its segment | LEB128 varint |
+| number of values, less one | 1 byte |
+| compressed length of each value | a LEB128 varint each |
+| the compressed values | |
+
+Reading a value reads the lengths of its batch up to its own and
+decompresses it with the symbol table of its segment; the tables are read
+from the memory map once and kept.
 
 | File | Holds | Sorted by |
 | --- | --- | --- |
 | `iriDictionaries/iris` | the local names of the namespaces of names, one namespace after the other | namespace, then local name |
 | `otherValueDictionaries/literals` | the labels of the literals, one language or datatype after the other | label, within each language or datatype |
-| `otherValueDictionaries/literal-groups` | per language or datatype: the offset of its first label, the datatype, the language | offset |
+| `otherValueDictionaries/literal-groups` | per language or datatype: the offset where its labels start, the datatype, the language | offset |
 | `namespaces/iri-namespaces` | Parquet: `id`, `namespace`; for a namespace of names `names_start` and `names_end`, its part of `iris`; for a prefix-and-number namespace `number_prefix`, `name_length`, `numbers` | id |
 | `numberDictionaries/integer_dict` | Parquet: `id_col` INT64, `int_long_value` string, 4096-row row groups | numeric value |
 
 `iris-index` and `literals-index` find the id of a value by its text
 (`HashIndex`): a long with the number of slots, a power of two, then the
 slots, at most 70% in use, filled by linear probing. A slot is 0 when empty,
-otherwise 24 bits of the hash of its value above the offset of the value
-plus one, in 40 bits, so offsets go up to 1 TiB and most other values in a
-probe are passed over on their hash bits alone. The hash is of the UTF-8
+otherwise 16 bits of the hash of its value above the id of the value plus
+one, in 48 bits, so ids go up to 2^48, files of values up to 2 TiB, and
+most other values in a probe are passed over on their hash bits alone. The hash is of the UTF-8
 bytes and of the group of the value, its namespace or its language or
 datatype, and a match must also lie in the part of the file of that group.
 
@@ -157,9 +180,9 @@ its value follows from the list it is in.
 
 | Kind | Id |
 | --- | --- |
-| IRI | `namespace (32 bits) \| local id (32 bits)`: the local id is the offset of the name in `iris` from the first name of its namespace, or the number after the prefix. Namespaces are numbered largest first. |
+| IRI | `namespace (24 bits) \| local id (40 bits)`: the local id is the id of the name in `iris` less the id where the names of its namespace start, or the number after the prefix. Namespaces are numbered largest first. |
 | blank node | a number given while loading |
-| dictionary literal | the offset of its label in `literals` |
+| dictionary literal | the id of its label in `literals` |
 | `xsd:int` | the value |
 | boolean | 1 or 0 |
 | `xsd:integer` | the value if it is a long without the high bit; otherwise the row in `integer_dict` with the high bit set |
@@ -167,9 +190,9 @@ its value follows from the list it is in.
 ```mermaid
 flowchart LR
     row["triple list row<br/>subject id | object id"]
-    row -->|IRI| split["high 32 bits: namespace<br/>low 32 bits: local id"]
-    split --> nsfile["offset in iris from the<br/>start of the namespace,<br/>or prefix + number"]
-    row -->|literal| lit["offset in literals"]
+    row -->|IRI| split["high 24 bits: namespace<br/>low 40 bits: local id"]
+    split --> nsfile["batch and index in iris,<br/>from the start of the namespace,<br/>or prefix + number"]
+    row -->|literal| lit["batch and index<br/>in literals"]
     row -->|"xsd:integer,<br/>high bit set"| big["integer_dict row"]
     row -->|"xsd:int, boolean,<br/>small xsd:integer,<br/>blank node"| self["the id is the value"]
 ```
@@ -203,11 +226,14 @@ with contexts, a list reads only the graph columns of those graphs, and
 only the rows where one of them is true. A list without graph columns is
 read only for the default graph.
 
-Literals and the local names of IRIs are read at their offset in the memory
-mapped files, and a literal keeps its label once read. A value in a query
+Literals and the local names of IRIs are decompressed from their batch in
+the memory mapped files, and a literal keeps its label once read. A value in a query
 is found by text through the hash index of its dictionary.
 
-On the taxonomy store, against the dictionaries in Parquet:
+On the taxonomy store, against the dictionaries in Parquet; FSST takes the
+uncompressed linear layout's reading of all 2.4 million names with their
+subjects from 1.1 to 1.8 s, and finding 10 000 IRIs or literals by text
+stays at 11 to 13 ms:
 
 | | Parquet | Linear and hash index |
 | --- | --- | --- |
@@ -257,19 +283,21 @@ store.
 
 ## What the store consists of
 
-With the dictionaries uncompressed and indexed, the taxonomy store is 294 MB
-in 72 files; with the dictionaries in Parquet it was 100 MiB, of which 35 MB
-dictionaries.
+With the dictionaries compressed with FSST and indexed, the taxonomy store
+is 230 MB in 72 files. FSST halves the local names, from 23.0 to 12.9 MB,
+and the literals, from 98.6 to 47.7 MB; the hash indexes, 101 MB, are now
+the larger part. With the dictionaries in Parquet the store was 100 MiB, of
+which 35 MB dictionaries.
 
 ```mermaid
 pie showData
     title taxonomy.rdf store, MB on disk
-    "literals" : 98.6
     "literals index" : 67.1
-    "triples by object" : 37.7
+    "literals" : 47.7
+    "triples by object" : 36.2
     "IRI local names index" : 33.6
-    "triples by subject" : 33.4
-    "IRI local names" : 23.0
+    "triples by subject" : 32.1
+    "IRI local names" : 12.9
     "IRI namespaces" : 0.4
 ```
 
@@ -312,7 +340,7 @@ What is still duplicated:
 
 ## Limitations
 
-- The files of local names and literals are not compressed, and their
-  indexes take 8 bytes per slot.
-- The local names of one namespace can take at most 4 GiB, as their offset
-  from its first name is the 32-bit local id; a load that needs more fails.
+- The hash indexes of local names and literals take 8 bytes per slot.
+- The compressed local names of one namespace can take at most 8 GiB, as
+  their batch offset, shifted by 7 bits, is in the 40-bit local id; there
+  can be at most 2^24 namespaces. A load that needs more fails.

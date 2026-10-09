@@ -26,10 +26,11 @@ import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
 /**
  * The literals that are not stored as themselves in the triple lists. Their
- * labels are in {@link LinearValues}, grouped by language, or by datatype
- * for literals without one, and sorted within a group. The id of a literal
- * is the offset of its label. The groups are in a small file of their own,
- * {@link #GROUPS_FILE}, and a {@link HashIndex} finds the id of a literal.
+ * labels are in {@link CompressedValues}, grouped by language, or by
+ * datatype for literals without one, and sorted within a group. The id of a
+ * literal is the id of its label there. The groups are in a small file of
+ * their own, {@link #GROUPS_FILE}, and a {@link HashIndex} finds the id of a
+ * literal.
  */
 public class RoLiteralDict implements Closeable {
 
@@ -38,8 +39,8 @@ public class RoLiteralDict implements Closeable {
      */
     public static final String PATH_NAME = "literals";
     /**
-     * Per group, in the order of the labels: the offset of its first label,
-     * its datatype and its language, if it has one.
+     * Per group, in the order of the labels: the offset where its labels
+     * start, its datatype and its language, if it has one.
      */
     public static final String GROUPS_FILE = "literal-groups";
     /**
@@ -48,26 +49,26 @@ public class RoLiteralDict implements Closeable {
     public static final String INDEX_FILE = "literals-index";
 
     /**
-     * A datatype or language and where its labels start.
+     * A datatype or language and the offset where its labels start.
      */
     public record Group(long start, IRI datatype, String language) {
     }
 
-    private final LinearValues labels;
+    private final CompressedValues labels;
     private final HashIndex index;
     private final long[] starts;
     private final List<Group> groups;
     private final Map<String, Integer> byLanguage = new HashMap<>();
     private final Map<String, Integer> byDatatype = new HashMap<>();
 
-    private RoLiteralDict(LinearValues labels, HashIndex index, List<Group> groups) {
+    private RoLiteralDict(CompressedValues labels, HashIndex index, List<Group> groups) {
         this.labels = labels;
         this.index = index;
         this.groups = groups;
         this.starts = new long[groups.size()];
         for (int g = 0; g < groups.size(); g++) {
             Group group = groups.get(g);
-            starts[g] = group.start();
+            starts[g] = CompressedValues.idAt(group.start());
             if (group.language() != null) {
                 byLanguage.put(group.language(), g);
             } else {
@@ -81,7 +82,7 @@ public class RoLiteralDict implements Closeable {
      */
     public static RoLiteralDict open(File directory) throws IOException {
         List<Group> groups = readGroups(new File(directory, GROUPS_FILE));
-        LinearValues labels = LinearValues.open(new File(directory, PATH_NAME));
+        CompressedValues labels = CompressedValues.open(new File(directory, PATH_NAME));
         try {
             return new RoLiteralDict(labels, HashIndex.open(new File(directory, INDEX_FILE)), groups);
         } catch (IOException | RuntimeException e) {
@@ -141,10 +142,10 @@ public class RoLiteralDict implements Closeable {
         }
         byte[] label = value.getLabel().getBytes(StandardCharsets.UTF_8);
         long start = starts[group];
-        long end = group + 1 < starts.length ? starts[group + 1] : labels.size();
-        long offset = index.find(HashIndex.hash(label, group),
+        long end = group + 1 < starts.length ? starts[group + 1] : CompressedValues.idAt(labels.size());
+        long id = index.find(HashIndex.hash(label, group),
                 at -> at >= start && at < end && labels.equalsAt(at, label));
-        return offset < 0 ? Optional.empty() : Optional.of(new RoSimpleLiteral(offset, this));
+        return id < 0 ? Optional.empty() : Optional.of(new RoSimpleLiteral(id, this));
     }
 
     /**

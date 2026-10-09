@@ -49,14 +49,13 @@ public class RoIriDictionary implements Closeable {
             .addColumn(NAMES_END, PhysicalType.INT64, RepetitionType.OPTIONAL)
             .build();
 
-    private LinearValues iris;
+    private CompressedValues iris;
     private HashIndex irisIndex;
-    private static final int BITS_IN_A_LONG = Long.BYTES*8;
     private final Map<Long, RoIriNamespaceDictionary> idToIriDictionaryMap;
     private final RoNamespaces namespaces;
 
     public Optional<String> getLocalNameFromId(long id) throws IOException {
-        long namespaceId = (id >>> (BITS_IN_A_LONG-RoNamespaces.BITS_FOR_NAMESPACES));
+        long namespaceId = RoNamespaces.namespaceOf(id);
         RoIriNamespaceDictionary namespace = idToIriDictionaryMap
                 .get(namespaceId);
         return namespace.getLocalNameFromId(id);
@@ -130,14 +129,14 @@ public class RoIriDictionary implements Closeable {
      *
      * @param namespacesFile the table of namespaces, see
      * {@link #NAMESPACES_SCHEMA}
-     * @param irisFile the local names, see {@link LinearValues}
+     * @param irisFile the local names, see {@link CompressedValues}
      * @param indexFile the {@link HashIndex} of the local names
      */
     public static RoIriDictionary open(File namespacesFile, File irisFile, File indexFile, Hardwood hardwood)
             throws IOException {
         RoNamespaces namespaces = new RoNamespaces();
         RoIriDictionary dictionary = new RoIriDictionary(namespaces);
-        dictionary.iris = LinearValues.open(irisFile);
+        dictionary.iris = CompressedValues.open(irisFile);
         dictionary.irisIndex = HashIndex.open(indexFile);
         try (ParquetTable table = ParquetTable.open(hardwood, namespacesFile)) {
             Optional<RowReader> rows = table.rows();

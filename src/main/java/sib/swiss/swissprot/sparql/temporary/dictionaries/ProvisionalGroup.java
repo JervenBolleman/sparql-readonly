@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Consumer;
 
 import dev.hardwood.metadata.LogicalType;
@@ -351,6 +352,17 @@ final class ProvisionalGroup<T> {
                     throw new IOException("Merging dictionary runs failed", e.getCause());
                 }
             }
+        }
+    }
+
+    /**
+     * Replaces every final id by what it maps to: for dictionaries that only
+     * know the ids of values once they are written, {@link #finish} records
+     * an index of the value, which this turns into its id.
+     */
+    void mapFinalIds(LongUnaryOperator map) {
+        for (int i = 0; i < finalIds.length; i++) {
+            finalIds[i] = map.applyAsLong(finalIds[i]);
         }
     }
 
