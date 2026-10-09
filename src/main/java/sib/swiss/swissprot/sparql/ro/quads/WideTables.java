@@ -270,7 +270,7 @@ public final class WideTables {
         }
         int columns = group.size();
         List<ListReader> readers = new ArrayList<>();
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(table, schema.build(), ParquetTable.LIST_CONFIG)) {
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(table, schema.build(), ParquetTable.TRIPLES_CONFIG)) {
             for (Candidate candidate : group) {
                 readers.add(new ListReader(candidate.list(), candidate.graphs(), hardwood));
             }

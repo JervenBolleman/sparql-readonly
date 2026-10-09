@@ -54,6 +54,17 @@ public final class ParquetTable implements Closeable {
             .rowGroupTargetRows(64 * 1024)
             .build();
 
+    /**
+     * For the triple lists and wide tables, read both by scans and by
+     * lookups of one subject or object. hardwood writes no page index, so a
+     * lookup decodes the whole row group that can hold its value: small row
+     * groups keep that short.
+     */
+    public static final WriterConfig TRIPLES_CONFIG = WriterConfig.builder()
+            .rowGroupBufferTargetBytes(4L << 20)
+            .rowGroupTargetRows(Integer.getInteger("sparql.ro.tripleRowGroupRows", 4096))
+            .build();
+
     private final ParquetFileReader reader;
 
     private ParquetTable(ParquetFileReader reader) {

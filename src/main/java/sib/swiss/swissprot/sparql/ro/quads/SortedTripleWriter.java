@@ -331,7 +331,7 @@ final class SortedTripleWriter {
             for (String graph : graphs) {
                 schema.addColumn(graph, PhysicalType.BOOLEAN, RepetitionType.REQUIRED);
             }
-            this.writer = new ParquetTable.Writer(file, schema.build(), ParquetTable.LIST_CONFIG);
+            this.writer = new ParquetTable.Writer(file, schema.build(), ParquetTable.TRIPLES_CONFIG);
         }
 
         void add(long subject, long object, int context) throws IOException {
