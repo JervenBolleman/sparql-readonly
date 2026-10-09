@@ -11,17 +11,18 @@ import java.nio.file.StandardOpenOption;
 import java.util.function.LongPredicate;
 
 /**
- * Finds the offset of a value in {@link LinearValues} by the hash of the
+ * Finds the id of a value in {@link CompressedValues} by the hash of the
  * value. An open addressing table with linear probing, memory mapped: a
  * long with the number of slots, a power of two, then the slots. A slot
- * holds 0 if it is empty, otherwise 24 bits of the hash of its value above
- * the offset of the value plus one, in 40 bits. So offsets go up to 1 TiB,
- * and most slots of other values are passed over without reading them.
+ * holds 0 if it is empty, otherwise 16 bits of the hash of its value above
+ * the id of the value plus one, in 48 bits. So ids go up to 2^48, values
+ * files to 2 TiB, and most slots of other values are passed over without
+ * reading them.
  */
 public final class HashIndex implements Closeable {
 
-    private static final int OFFSET_BITS = 40;
-    private static final long OFFSET_MASK = (1L << OFFSET_BITS) - 1;
+    private static final int ID_BITS = 48;
+    private static final long ID_MASK = (1L << ID_BITS) - 1;
     /**
      * The most slots in use, as a share of all slots.
      */
@@ -75,13 +76,13 @@ public final class HashIndex implements Closeable {
     }
 
     private static long tag(long hash) {
-        return hash >>> OFFSET_BITS;
+        return hash >>> ID_BITS;
     }
 
     /**
      * @param hash the hash of the value, see {@link #hash(byte[], long)}
-     * @param matches whether the value at an offset is the one looked for
-     * @return the offset of the value, -1 if it is not there
+     * @param matches whether the value with an id is the one looked for
+     * @return the id of the value, -1 if it is not there
      */
     public long find(long hash, LongPredicate matches) {
         if (slots == MemorySegment.NULL) {
@@ -93,10 +94,10 @@ public final class HashIndex implements Closeable {
             if (entry == 0) {
                 return -1;
             }
-            if (entry >>> OFFSET_BITS == tag) {
-                long offset = (entry & OFFSET_MASK) - 1;
-                if (matches.test(offset)) {
-                    return offset;
+            if (entry >>> ID_BITS == tag) {
+                long id = (entry & ID_MASK) - 1;
+                if (matches.test(id)) {
+                    return id;
                 }
             }
         }
@@ -142,13 +143,13 @@ public final class HashIndex implements Closeable {
 
         /**
          * @param hash the hash of the value, see {@link #hash(byte[], long)}
-         * @param offset the offset of the value, which is not in the index
+         * @param id the id of the value, which is not in the index
          */
-        public void add(long hash, long offset) throws IOException {
-            if (offset + 1 > OFFSET_MASK) {
-                throw new IOException("Values beyond " + OFFSET_MASK + " bytes can not be indexed");
+        public void add(long hash, long id) throws IOException {
+            if (id + 1 > ID_MASK) {
+                throw new IOException("Ids beyond " + ID_MASK + " can not be indexed");
             }
-            long entry = (tag(hash) << OFFSET_BITS) | (offset + 1);
+            long entry = (tag(hash) << ID_BITS) | (id + 1);
             for (long slot = hash & mask;; slot = (slot + 1) & mask) {
                 long at = Long.BYTES * (slot + 1);
                 if (slots.get(ValueLayout.JAVA_LONG_UNALIGNED, at) == 0) {

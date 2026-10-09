@@ -79,15 +79,44 @@ public class RoNamespaces implements Iterable<RoNamespace> {
 
     public RoNamespace getFromId(long id) {
 
-        int intId = (int) (id >> (BITS_IN_A_LONG - BITS_FOR_NAMESPACES));
+        int intId = (int) namespaceOf(id);
         return namespaces.stream()
                 .skip(intId)
                 .findFirst()
                 .get();
 
     }
-    private static final int BITS_IN_A_LONG = 64;
-    public static final int BITS_FOR_NAMESPACES = 32;
+    /**
+     * The bits of an IRI id that hold the local id; the others hold the
+     * namespace: {@code namespace << LOCAL_BITS | local}.
+     */
+    public static final int LOCAL_BITS = 40;
+    public static final long LOCAL_MASK = (1L << LOCAL_BITS) - 1;
+    /**
+     * The most namespaces the ids have room for.
+     */
+    public static final long MAX_NAMESPACES = 1L << (Long.SIZE - LOCAL_BITS);
+
+    /**
+     * @return the id of the IRI with this local id in this namespace
+     */
+    public static long iriId(long namespace, long local) {
+        return namespace << LOCAL_BITS | local;
+    }
+
+    /**
+     * @return the namespace of an IRI id
+     */
+    public static long namespaceOf(long iriId) {
+        return iriId >>> LOCAL_BITS;
+    }
+
+    /**
+     * @return the local id of an IRI id
+     */
+    public static long localOf(long iriId) {
+        return iriId & LOCAL_MASK;
+    }
 
     static RoNamespace fromSavedString(String s, int i) {
         int firstColon = s.indexOf(':');

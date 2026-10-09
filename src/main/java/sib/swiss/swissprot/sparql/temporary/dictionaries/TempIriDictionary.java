@@ -18,14 +18,14 @@ import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.dictionaries.HashIndex;
-import sib.swiss.swissprot.sparql.ro.dictionaries.LinearValues;
+import sib.swiss.swissprot.sparql.ro.dictionaries.CompressedValues;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
 
     /**
      * The file of the local names of the namespaces that are not a prefix and
-     * a number, see {@link LinearValues}.
+     * a number, see {@link CompressedValues}.
      */
     public static final String IRIS_FILE = "iris";
     /**
@@ -188,10 +188,13 @@ public class TempIriDictionary extends TempDictionary {
                 names += group.provisionalIds();
             }
         }
+        if (biggestFirst.size() > RoNamespaces.MAX_NAMESPACES) {
+            throw new IOException(biggestFirst.size() + " namespaces, more than the " + RoNamespaces.MAX_NAMESPACES
+                    + " IRI ids have room for");
+        }
         try (NameWriter iris = new NameWriter(irisFile, indexFile, names)) {
             for (int id = 0; id < biggestFirst.size(); id++) {
                 ProvisionalGroup<String> group = biggestFirst.get(id);
-                final long namespaceBits = ((long) id) << RoNamespaces.BITS_FOR_NAMESPACES;
                 final long namespaceId = id;
                 DataDistribution data = distributionOfGroup.get(group.index());
                 String namespace = namespaceOfGroup.get(group.index());
@@ -202,14 +205,16 @@ public class TempIriDictionary extends TempDictionary {
                     group.finish(localName -> {
                         int number = Integer.parseInt(localName.substring(prefix.length()));
                         numbers.add(number);
-                        return namespaceBits | number;
+                        return RoNamespaces.iriId(namespaceId, number);
                     });
                     namespaces.addNumbers(id, namespace, prefix, data.minLength, numbers);
                 } else {
-                    // the id is the offset of the name from the first name of
-                    // the namespace
-                    final long start = iris.position();
-                    group.finish(localName -> namespaceBits | iris.add(namespaceId, start, localName));
+                    // the local id is the id of the name in the compressed
+                    // names, from the start of the namespace
+                    final long start = iris.start(namespaceId);
+                    group.finish(localName -> iris.add(localName));
+                    CompressedValues.Ids ids = iris.endNamespace();
+                    group.mapFinalIds(index -> RoNamespaces.iriId(namespaceId, local(ids.id(index), start)));
                     namespaces.addNames(id, namespace, start, iris.position());
                 }
             }
@@ -299,37 +304,59 @@ public class TempIriDictionary extends TempDictionary {
     }
 
     /**
-     * Writes the local names, see {@link LinearValues}, and their
+     * @param id the id of a name in the compressed names
+     * @param start the offset where the names of its namespace start
+     * @return its local id
+     */
+    private static long local(long id, long start) {
+        long local = id - CompressedValues.idAt(start);
+        if (local > RoNamespaces.LOCAL_MASK) {
+            throw new IllegalStateException("The compressed local names of a namespace take more than "
+                    + (RoNamespaces.LOCAL_MASK >>> CompressedValues.BATCH_BITS) + " bytes, which local ids can not address");
+        }
+        return local;
+    }
+
+    /**
+     * Writes the local names, see {@link CompressedValues}, and their
      * {@link HashIndex}. Without names there are no files.
      */
     private static final class NameWriter implements java.io.Closeable {
 
         private final File file;
-        private final LinearValues.Writer names;
         private final HashIndex.Writer index;
+        private final CompressedValues.Writer names;
+        private long namespace;
         private boolean any;
 
         private NameWriter(File file, File indexFile, long expected) throws IOException {
             this.file = file;
-            this.names = new LinearValues.Writer(file);
             this.index = expected == 0 ? null : new HashIndex.Writer(indexFile, expected);
+            this.names = new CompressedValues.Writer(file,
+                    (name, id) -> index.add(HashIndex.hash(name, namespace), id));
         }
 
         /**
-         * @param start the offset of the first name of the namespace
-         * @return the local id of the name: its offset from start
+         * Starts the names of a namespace.
+         *
+         * @return the offset where they start
          */
-        long add(long namespace, long start, String localName) throws IOException {
-            byte[] bytes = localName.getBytes(StandardCharsets.UTF_8);
-            long offset = names.add(bytes);
-            index.add(HashIndex.hash(bytes, namespace), offset);
+        long start(long namespace) {
+            this.namespace = namespace;
+            return names.position();
+        }
+
+        /**
+         * @return the index of the name in its namespace, see
+         * {@link #endNamespace()}
+         */
+        long add(String localName) throws IOException {
             any = true;
-            long local = offset - start;
-            if (local > 0xFFFF_FFFFL) {
-                throw new IOException("The local names of namespace " + namespace
-                        + " take more than 4 GiB, which a local id can not address");
-            }
-            return local;
+            return names.add(localName.getBytes(StandardCharsets.UTF_8));
+        }
+
+        CompressedValues.Ids endNamespace() throws IOException {
+            return names.endGroup();
         }
 
         long position() {
