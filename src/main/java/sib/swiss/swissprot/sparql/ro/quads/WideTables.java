@@ -270,7 +270,8 @@ public final class WideTables {
         }
         int columns = group.size();
         List<ListReader> readers = new ArrayList<>();
-        try (ParquetTable.Writer writer = new ParquetTable.Writer(table, schema.build(), ParquetTable.TRIPLES_CONFIG)) {
+        try (ParquetTable.Writer writer = new ParquetTable.Writer(table, schema.build(),
+                ParquetTable.triplesConfig(RoResourceRoValueList.SUBJECT))) {
             for (Candidate candidate : group) {
                 readers.add(new ListReader(candidate.list(), candidate.graphs(), hardwood));
             }
@@ -337,7 +338,7 @@ public final class WideTables {
          * @return true if the list has the subject, which is at or after the
          * last one asked for
          */
-        boolean at(long subject) {
+        boolean at(long subject) throws IOException {
             while (true) {
                 while (next < subjects.length && subjects[next] < subject) {
                     next++;

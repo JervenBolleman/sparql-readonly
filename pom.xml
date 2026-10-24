@@ -15,7 +15,7 @@
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<maven.compiler.release>25</maven.compiler.release>
 		<rdf4j.version>6.1.0</rdf4j.version>
-		<hardwood.version>1.1.0.Beta1</hardwood.version>
+		<hardwood.version>1.1.0.Beta3</hardwood.version>
 		<native-build-tools.version>1.1.14</native-build-tools.version>
 		<loader.mainClass>sib.swiss.swissprot.sparql.ro.Loader</loader.mainClass>
 		<loader.imageName>sparql-ro-loader</loader.imageName>

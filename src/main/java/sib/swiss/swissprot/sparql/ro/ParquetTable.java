@@ -19,8 +19,11 @@ import dev.hardwood.schema.ColumnProjection;
 import dev.hardwood.schema.ColumnSchema;
 import dev.hardwood.schema.FileSchema;
 import dev.hardwood.writer.ColumnBatch;
+import dev.hardwood.writer.ColumnEncoding;
 import dev.hardwood.writer.ParquetFileWriter;
 import dev.hardwood.writer.WriterConfig;
+
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 
 /**
  * A read only Parquet file. A missing or zero length file is treated as a
@@ -36,12 +39,14 @@ public final class ParquetTable implements Closeable {
     private static final int LOOKUP_BATCH_SIZE = 4096;
 
     /**
-     * For files read by point lookups on sorted columns. hardwood writes no
-     * page index, so statistics can only skip whole row groups: small ones
-     * let a lookup decode only the row group that can hold the value.
+     * For the dictionaries read by point lookups on their sorted id column:
+     * a lookup decodes only the page that can hold the id, found by the page
+     * index. The id is delta encoded, see {@link #triplesConfig(String)}.
      */
     public static final WriterConfig LOOKUP_CONFIG = WriterConfig.builder()
-            .rowGroupTargetRows(LOOKUP_BATCH_SIZE)
+            .rowGroupTargetRows(64 * 1024)
+            .pageTargetRows(1024)
+            .encoding(RoDictionary.ID, ColumnEncoding.DELTA_BINARY_PACKED)
             .build();
 
     /**
@@ -55,15 +60,34 @@ public final class ParquetTable implements Closeable {
             .build();
 
     /**
-     * For the triple lists and wide tables, read both by scans and by
-     * lookups of one subject or object. hardwood writes no page index, so a
-     * lookup decodes the whole row group that can hold its value: small row
-     * groups keep that short.
+     * The rows of the row groups of the triple lists and wide tables.
      */
-    public static final WriterConfig TRIPLES_CONFIG = WriterConfig.builder()
-            .rowGroupBufferTargetBytes(4L << 20)
-            .rowGroupTargetRows(Integer.getInteger("sparql.ro.tripleRowGroupRows", 4096))
-            .build();
+    private static final int TRIPLE_ROW_GROUP_ROWS = Integer.getInteger("sparql.ro.tripleRowGroupRows", 64 * 1024);
+    /**
+     * The rows of their pages, which a lookup of one subject or object
+     * reads only those of that can hold it, found by the page index.
+     */
+    private static final int TRIPLE_PAGE_ROWS = Integer.getInteger("sparql.ro.triplePageRows", 1024);
+
+    /**
+     * For the triple lists and wide tables, read both by scans and by
+     * lookups of one subject or object. A lookup skips row groups by their
+     * statistics and pages by the page index, so small pages keep it short
+     * while row groups can stay large.
+     *
+     * @param sortedColumn the column the rows are sorted by. It is delta
+     * encoded rather than dictionary encoded: that suits sorted ids, and a
+     * reader would otherwise read the dictionary of every row group a lookup
+     * reaches, although its statistics already tell where the value can be.
+     */
+    public static WriterConfig triplesConfig(String sortedColumn) {
+        return WriterConfig.builder()
+                .rowGroupBufferTargetBytes(4L << 20)
+                .rowGroupTargetRows(TRIPLE_ROW_GROUP_ROWS)
+                .pageTargetRows(TRIPLE_PAGE_ROWS)
+                .encoding(sortedColumn, ColumnEncoding.DELTA_BINARY_PACKED)
+                .build();
+    }
 
     private final ParquetFileReader reader;
 
@@ -104,7 +128,7 @@ public final class ParquetTable implements Closeable {
      * @return a reader over all rows, the caller must close it. Empty if this
      * table has no rows.
      */
-    public Optional<RowReader> rows() {
+    public Optional<RowReader> rows() throws IOException {
         if (isEmpty()) {
             return Optional.empty();
         }
@@ -115,7 +139,7 @@ public final class ParquetTable implements Closeable {
      * @return a reader over the rows matching the filter exactly, which the
      * caller must close. Empty if this table has no rows.
      */
-    public Optional<RowReader> rows(FilterPredicate filter) {
+    public Optional<RowReader> rows(FilterPredicate filter) throws IOException {
         if (isEmpty()) {
             return Optional.empty();
         }
@@ -127,7 +151,7 @@ public final class ParquetTable implements Closeable {
      * {@code batchSize} rows, which the caller must close. Empty if this table
      * has no rows.
      */
-    public Optional<ColumnReaders> columns(int batchSize, String... columns) {
+    public Optional<ColumnReaders> columns(int batchSize, String... columns) throws IOException {
         if (isEmpty()) {
             return Optional.empty();
         }
@@ -141,7 +165,8 @@ public final class ParquetTable implements Closeable {
      * of at most {@code batchSize} rows, which the caller must close. Empty if
      * this table has no rows.
      */
-    public Optional<ColumnReaders> columns(FilterPredicate filter, int batchSize, String... columns) {
+    public Optional<ColumnReaders> columns(FilterPredicate filter, int batchSize, String... columns)
+            throws IOException {
         if (isEmpty()) {
             return Optional.empty();
         }
@@ -163,7 +188,7 @@ public final class ParquetTable implements Closeable {
      * @return the value read or empty if no row matches
      */
     public <T> Optional<T> first(FilterPredicate filter,
-            Function<ColumnReaders, T> value, String... columns) {
+            Function<ColumnReaders, T> value, String... columns) throws IOException {
         if (isEmpty()) {
             return Optional.empty();
         }

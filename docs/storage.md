@@ -64,8 +64,13 @@ subject and kind of object. Only lists with triples have files.
 A list file has two columns, `subject` and `object`, both `INT64` ids (see
 "Ids"). It is sorted by subject, then object, and holds every triple once.
 Its `-by-object` copy holds the same triples sorted by object, then subject.
-Row groups hold 64k triples, so that statistics on the sorted column let a
-lookup skip all but the row group that holds its value.
+Row groups hold 64k triples, in pages of 1024. Statistics on the sorted
+column let a lookup skip all but the row group that holds its value, and the
+page index all but the pages that do. The sorted column is
+`DELTA_BINARY_PACKED`, not dictionary encoded: otherwise the reader reads the
+dictionary of each row group a lookup reaches to check for the value, which
+the statistics already decide. `-Dsparql.ro.tripleRowGroupRows` and
+`-Dsparql.ro.triplePageRows` change the two sizes at load time.
 
 ### Graphs
 
@@ -154,7 +159,7 @@ from the memory map once and kept.
 | `otherValueDictionaries/literals` | the labels of the literals, one language or datatype after the other | label, within each language or datatype |
 | `otherValueDictionaries/literal-groups` | per language or datatype: the offset where its labels start, the datatype, the language | offset |
 | `namespaces/iri-namespaces` | Parquet: `id`, `namespace`; for a namespace of names `names_start` and `names_end`, its part of `iris`; for a prefix-and-number namespace `number_prefix`, `name_length`, `numbers` | id |
-| `numberDictionaries/integer_dict` | Parquet: `id_col` INT64, `int_long_value` string, 4096-row row groups | numeric value |
+| `numberDictionaries/integer_dict` | Parquet: `id_col` INT64, delta encoded, `int_long_value` string, 64k-row row groups in pages of 1024 | numeric value |
 
 `iris-index` and `literals-index` find the id of a value by its text
 (`HashIndex`): a long with the number of slots, a power of two, then the
@@ -243,8 +248,22 @@ stays at 11 to 13 ms:
 | `getStatements` by subject IRI, 10 000 times | 26 s | 19 s |
 | all 1.9 million species with name and parent, read as text | not done in 25 min | 3.7 s |
 
-What is left of a `getStatements` with a constant, 1.9 ms, is the lookup in
-the triple list.
+What is left of a `getStatements` with a constant is the lookup in the
+triple list. On the taxonomy store, best of six rounds of 10 000 lookups (1000
+for all of a subject), with the lists in row groups of 4096 and with the
+layout above:
+
+| | 4096-row row groups | 64k-row row groups, pages of 1024, delta encoded sorted column |
+| --- | --- | --- |
+| one subject and predicate | 0.49 ms | 0.19 ms |
+| one object and predicate | 0.42 ms | 0.18 ms |
+| all statements of one subject | 4.7 ms | 4.4 ms |
+| scanning all 16.6 million statements | 2.2 s | 1.8 to 2.4 s |
+| store size | 224 MB | 212 MB |
+| sorting and writing the triple lists | 27 s | 14 s |
+
+Most of a lookup is now hardwood planning the read: checking the column
+paths, parsing the offset index of the row group, and finding the codec.
 
 On the taxonomy store: one subject and predicate, 6 ms; one object and
 predicate (3 statements), 5 ms; all statements of one subject, 68 ms.

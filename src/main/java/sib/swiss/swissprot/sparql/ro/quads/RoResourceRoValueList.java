@@ -4,6 +4,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -320,9 +321,14 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
             }
         }
         String[] columns = projection.toArray(String[]::new);
-        Optional<ColumnReaders> batches = filter == null
-                ? table.columns(batchSize, columns)
-                : table.columns(filter, batchSize, columns);
+        Optional<ColumnReaders> batches;
+        try {
+            batches = filter == null
+                    ? table.columns(batchSize, columns)
+                    : table.columns(filter, batchSize, columns);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         return batches.<Iterator<Statement>>map(readers -> {
             RoResourceValueListIterator iterator = newIterator(readers);
             iterator.columns(columns, contexts);
@@ -496,8 +502,12 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
         @Override
         public void close() {
             if (open) {
-                batches.close();
                 open = false;
+                try {
+                    batches.close();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
         }
 
@@ -516,7 +526,7 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
                     }
                     next++;
                     graph = 0;
-                } else if (batches.nextBatch()) {
+                } else if (nextBatch()) {
                     subjects = batches.getColumnReader(columns[0]).getLongs();
                     objects = batches.getColumnReader(columns[1]).getLongs();
                     inGraph = new boolean[columns.length - 2][];
@@ -526,11 +536,18 @@ public abstract class RoResourceRoValueList<S extends RoResource, O extends RoVa
                     next = 0;
                     graph = 0;
                 } else {
-                    batches.close();
-                    open = false;
+                    close();
                 }
             }
             return false;
+        }
+
+        private boolean nextBatch() {
+            try {
+                return batches.nextBatch();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
     }
 }

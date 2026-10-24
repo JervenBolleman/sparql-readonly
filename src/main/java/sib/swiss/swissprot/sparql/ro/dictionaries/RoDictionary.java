@@ -2,8 +2,11 @@ package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Optional;
+import java.util.function.Function;
 
+import dev.hardwood.reader.ColumnReaders;
 import dev.hardwood.reader.FilterPredicate;
 import org.eclipse.rdf4j.model.Value;
 
@@ -33,20 +36,26 @@ public abstract class RoDictionary<T extends RoValue, V extends Value> implement
 	}
 
 	protected Optional<String> readStringAt(long offset, String column) {
-		return table.first(FilterPredicate.eq(ID, offset),
-				c -> c.getColumnReader(column).getStrings()[0], column);
+		return first(FilterPredicate.eq(ID, offset), c -> c.getColumnReader(column).getStrings()[0], column);
 	}
 
 	protected Optional<Long> readLongAt(long offset, String column) {
-		return table.first(FilterPredicate.eq(ID, offset),
-				c -> c.getColumnReader(column).getLongs()[0], column);
+		return first(FilterPredicate.eq(ID, offset), c -> c.getColumnReader(column).getLongs()[0], column);
 	}
 
 	/**
 	 * @return the id of the first row matching the filter
 	 */
 	protected Optional<Long> findId(FilterPredicate filter) {
-		return table.first(filter, c -> c.getColumnReader(ID).getLongs()[0], ID);
+		return first(filter, c -> c.getColumnReader(ID).getLongs()[0], ID);
+	}
+
+	private <R> Optional<R> first(FilterPredicate filter, Function<ColumnReaders, R> value, String column) {
+		try {
+			return table.first(filter, value, column);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	public abstract Optional<T> find(V value);

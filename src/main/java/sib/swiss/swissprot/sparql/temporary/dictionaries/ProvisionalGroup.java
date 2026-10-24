@@ -461,7 +461,7 @@ final class ProvisionalGroup<T> {
         }
 
         @Override
-        public boolean advance() {
+        public boolean advance() throws IOException {
             if (batches == null) {
                 return false;
             }

@@ -36,8 +36,10 @@ intermediate Parquet file. Measured on 2026-10-04 at commit `ad2e55f`, on an
 | Id to string, 4096 row groups (now) | 0.7 ms |
 | Value to id lookup, 1024 row groups | 1.35 ms (no better) |
 
-hardwood writes no page index, so statistics can only skip whole row groups.
-Since `ad2e55f` the dictionaries use 4096-row groups. What is left is a fixed
+hardwood 1.1.0.Beta1 wrote no page index, so statistics could only skip whole
+row groups. Since `ad2e55f` the dictionaries used 4096-row groups; since
+hardwood 1.1.0.Beta2, which writes a page index, they use 64k-row groups in
+pages of 1024, see storage.md. What is left is a fixed
 cost of about 1 ms per lookup for building the column readers and handing the
 work to the decode thread pool. Smaller row groups do not reduce it.
 

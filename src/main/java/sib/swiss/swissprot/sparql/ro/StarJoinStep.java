@@ -1,6 +1,8 @@
 package sib.swiss.swissprot.sparql.ro;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -330,16 +332,20 @@ final class StarJoinStep implements QueryEvaluationStep {
                         : FilterPredicate.eq(column, objects.get(i).id());
                 filter = filter == null ? present : FilterPredicate.and(filter, present);
             }
-            this.batches = lists.get(0).bySubject()
-                    .columns(filter, BATCH_SIZE, projection.toArray(String[]::new))
-                    .orElse(null);
+            try {
+                this.batches = lists.get(0).bySubject()
+                        .columns(filter, BATCH_SIZE, projection.toArray(String[]::new))
+                        .orElse(null);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
 
         @Override
         public boolean nextSubject() {
             next++;
             while (next >= subjects.length) {
-                if (batches == null || !batches.nextBatch()) {
+                if (batches == null || !nextBatch()) {
                     return false;
                 }
                 subjects = batches.getColumnReader(RoResourceRoValueList.SUBJECT).getLongs();
@@ -394,10 +400,22 @@ final class StarJoinStep implements QueryEvaluationStep {
             return values;
         }
 
+        private boolean nextBatch() {
+            try {
+                return batches.nextBatch();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
         @Override
         public void close() {
             if (batches != null) {
-                batches.close();
+                try {
+                    batches.close();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
         }
     }

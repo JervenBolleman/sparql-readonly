@@ -131,7 +131,7 @@ final class SortedTripleWriter {
         long written;
         if (runs.isEmpty()) {
             sortBuffer();
-            try (Output out = new Output(file, graphs)) {
+            try (Output out = new Output(file, graphs, sortedColumn())) {
                 for (int i = 0; i < size; i++) {
                     out.addUnique(subjects[i], objects[i], contexts[i]);
                 }
@@ -153,7 +153,7 @@ final class SortedTripleWriter {
                 }
                 runs.add(merged);
             }
-            try (Output out = new Output(file, graphs)) {
+            try (Output out = new Output(file, graphs, sortedColumn())) {
                 merge(runs, out, true);
                 written = out.rows;
             }
@@ -285,6 +285,13 @@ final class SortedTripleWriter {
      * Writes sorted triples, to a run with their context, or to the list
      * once each with a column per graph.
      */
+    /**
+     * @return the column the list is sorted by
+     */
+    private String sortedColumn() {
+        return byObject ? RoResourceRoValueList.OBJECT : RoResourceRoValueList.SUBJECT;
+    }
+
     private static final class Output implements Closeable {
 
         private final ParquetTable.Writer writer;
@@ -317,7 +324,7 @@ final class SortedTripleWriter {
         /**
          * The list.
          */
-        private Output(File file, List<String> named) throws IOException {
+        private Output(File file, List<String> named, String sortedColumn) throws IOException {
             this.withContext = false;
             List<String> columns = new ArrayList<>(named);
             if (!columns.isEmpty()) {
@@ -331,7 +338,7 @@ final class SortedTripleWriter {
             for (String graph : graphs) {
                 schema.addColumn(graph, PhysicalType.BOOLEAN, RepetitionType.REQUIRED);
             }
-            this.writer = new ParquetTable.Writer(file, schema.build(), ParquetTable.TRIPLES_CONFIG);
+            this.writer = new ParquetTable.Writer(file, schema.build(), ParquetTable.triplesConfig(sortedColumn));
         }
 
         void add(long subject, long object, int context) throws IOException {
@@ -416,7 +423,7 @@ final class SortedTripleWriter {
                     RoResourceRoValueList.OBJECT, CONTEXT).orElse(null);
         }
 
-        boolean advance() {
+        boolean advance() throws IOException {
             if (batches == null) {
                 return false;
             }
