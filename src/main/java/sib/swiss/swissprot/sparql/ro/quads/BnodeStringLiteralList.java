@@ -2,17 +2,11 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.ColumnReaders;
 
-import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -22,50 +16,47 @@ import sib.swiss.swissprot.sparql.ro.values.RoStringLiteral;
 public class BnodeStringLiteralList extends RoResourceRoValueList<RoBnode, RoStringLiteral> {
 
     public BnodeStringLiteralList(File file, RoIri predicate,
-            RoDictionaries dictionaries, Configuration configuration)
+            RoDictionaries dictionaries, Hardwood hardwood)
             throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
+        super(file, predicate, dictionaries, hardwood);
     }
 
-    private BnodeStringLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+
+    @Override
+    protected RoBnode getSubject(long id) {
+        return new RoBnode(id);
     }
 
     @Override
-    protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
+    protected RoStringLiteral getObject(long id) {
+        return new RoStringLiteral(id, dictionaries.getLiteralDict());
     }
 
     @Override
-    protected RoStringLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoStringLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getLiteralDict());
-    }
-
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    public Term.Kind subjectKind() {
+        return Term.Kind.BNODE;
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new BnodeStringListIterator(getSchema());
+    public Term.Kind objectKind() {
+        return Term.Kind.LITERAL;
+    }
+
+    @Override
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
+        return new BnodeStringListIterator(rows);
     }
 
     public static class Builder extends AbstractBuilder<RoBnode, RoStringLiteral> {
 
-        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration)
+        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood)
                 throws IOException {
-            super(file, predicate, dictionaries, configuration, BnodeStringLiteralList::getSchema);
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public BnodeStringLiteralList build() throws IOException {
             save();
-            return new BnodeStringLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new BnodeStringLiteralList(file, predicate, dictionaries, hardwood);
         }
 
     }
@@ -73,8 +64,8 @@ public class BnodeStringLiteralList extends RoResourceRoValueList<RoBnode, RoStr
     private class BnodeStringListIterator
             extends RoResourceValueListIterator {
 
-        private BnodeStringListIterator(TypeDescription schema) {
-            super(schema);
+        private BnodeStringListIterator(ColumnReaders rows) {
+            super(rows);
         }
 
     }

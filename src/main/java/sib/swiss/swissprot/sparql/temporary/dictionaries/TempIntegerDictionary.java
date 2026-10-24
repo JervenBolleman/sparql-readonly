@@ -1,107 +1,70 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.math.BigInteger;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.common.type.HiveDecimal;
-import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
-import org.apache.orc.CompressionKind;
-import org.apache.orc.OrcFile;
-import org.apache.orc.Reader;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
-
-import org.eclipse.rdf4j.model.impl.IntegerLiteral;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict.INT_LONG_VALUE;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
 import static sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary.SECOND_BYTE_TRUE;
 
+import java.io.File;
+import java.io.IOException;
+import java.math.BigInteger;
+
+import dev.hardwood.Hardwood;
+
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
+import sib.swiss.swissprot.sparql.ro.dictionaries.RoBigIntegerDict;
+
+/**
+ * Collects the integers that are not their own id, see
+ * {@link RoBigIntegerDict}. They are stored sorted, their id is their row with
+ * the high bit set.
+ */
 public class TempIntegerDictionary extends TempDictionary {
 
-    private final Set<BigInteger> set = new HashSet<>();
+	private final ProvisionalGroup<BigInteger> values;
 
-    public TempIntegerDictionary(File out, Configuration conf) {
-        super(out, conf);
-    }
+	public TempIntegerDictionary(File out, Hardwood hardwood) {
+		this(out, hardwood, SpillContext.unbounded(hardwood));
+	}
 
-    public void add(IntegerLiteral subject) throws IOException {
-        try {
-            if ((SECOND_BYTE_TRUE & subject.integerValue().longValueExact()) == SECOND_BYTE_TRUE) {
-                set.add(subject.integerValue());
-            }
-        } catch (ArithmeticException e) {
-            set.add(subject.integerValue());
-        }
+	public TempIntegerDictionary(File out, Hardwood hardwood, SpillContext spill) {
+		super(out, hardwood);
+		this.values = new ProvisionalGroup<>(0, ProvisionalGroup.BIG_INTEGERS, spill);
+	}
 
-    }
+	/**
+	 * @return true if the integer is its own id, a long without the high bit
+	 */
+	public static boolean isInline(BigInteger value) {
+		return value.signum() >= 0 && value.bitLength() < Long.SIZE;
+	}
 
-    @Override
-    public void close() throws IOException {
-        try (ObjectOutputStream dos = new ObjectOutputStream(new FileOutputStream(new File(out, "temp")))) {
-            dos.writeInt(set.size());
-            for (BigInteger bi : set) {
-                dos.writeObject(bi);
-            }
-        }
-    }
+	/**
+	 * @param value an integer that is not {@link #isInline(BigInteger)}
+	 * @return its provisional id, see {@link #finalId(long)}
+	 */
+	public long add(BigInteger value) throws IOException {
+		return values.add(value);
+	}
 
-    public RoBigIntegerDict load() throws IOException {
-        TypeDescription schema;
-        schema = TypeDescription.createStruct()
-                .addField(RoDictionary.ID, TypeDescription.createLong())
-                .addField(INT_LONG_VALUE, TypeDescription.createDecimal());
-        VectorizedRowBatch batch = schema.createRowBatch();
-        File file = new File(out.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
-        if (file.exists()) {
-            file.delete();
-        }
-        final Path path = new Path(out.getAbsolutePath(), RoBigIntegerDict.PATH_NAME);
-        try (Writer writer = OrcFile.createWriter(path,
-                OrcFile.writerOptions(conf)
-                        .setSchema(schema)
-                        .compress(CompressionKind.LZ4))) {
+	public long finalId(long provisionalId) {
+		return values.finalId(provisionalId);
+	}
 
-            File f = new File(out, "temp");
-            if (f.exists()) {
-                writeIntegersToRowVectors(f, batch, writer);
-            }
-        } catch (ClassNotFoundException ex) {
-            Logger.getLogger(TempIntegerDictionary.class.getName()).log(Level.SEVERE, null, ex);
-        }
+	@Override
+	public void close() {
+	}
 
-        Reader reader = OrcFile.createReader(path, OrcFile.readerOptions(conf));
-        return new RoBigIntegerDict(reader);
-    }
-
-    private void writeIntegersToRowVectors(File f, VectorizedRowBatch batch, final Writer writer) throws ClassNotFoundException, IOException {
-        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(f))) {
-            int size = in.readInt();
-            for (int i = 0; i < size; i++) {
-                LongColumnVector idCol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                DecimalColumnVector datatypesCol = (DecimalColumnVector) batch.cols[RoDictionary.VALUE_COL];
-                
-                if (batch.size == batch.getMaxSize()) {
-                    writer.addRowBatch(batch);
-                    batch.reset();
-                }
-                BigInteger read = (BigInteger) in.readObject();
-                idCol.vector[batch.size] = i;
-                datatypesCol.vector[batch.size++] = new HiveDecimalWritable(HiveDecimal.create(read));
-            }
-        }
-    }
+	public RoBigIntegerDict load() throws IOException {
+		File file = new File(out, RoBigIntegerDict.PATH_NAME);
+		if (file.exists()) {
+			file.delete();
+		}
+		if (values.provisionalIds() > 0) {
+			try (IdValueWriter writer = new IdValueWriter(file, RoBigIntegerDict.SCHEMA, INT_LONG_VALUE)) {
+				values.finish(value -> writer.add(value.toString()) | SECOND_BYTE_TRUE);
+			}
+		} else {
+			values.finish(value -> 0);
+		}
+		return new RoBigIntegerDict(ParquetTable.open(hardwood, file));
+	}
 }

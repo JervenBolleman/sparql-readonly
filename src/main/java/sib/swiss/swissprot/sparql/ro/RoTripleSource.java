@@ -1,8 +1,5 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import java.io.IOException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.model.IRI;
@@ -16,24 +13,28 @@ import org.eclipse.rdf4j.query.algebra.evaluation.TripleSource;
 public class RoTripleSource implements TripleSource {
 
     private final RoStore store;
+    private final PushedFilter filter;
 
     public RoTripleSource(RoStore store) {
+        this(store, PushedFilter.NONE);
+    }
+
+    /**
+     * @param filter on the objects of every pattern, see {@link PushedFilter}
+     */
+    RoTripleSource(RoStore store, PushedFilter filter) {
         this.store = store;
+        this.filter = filter;
     }
 
     @Override
-    public CloseableIteration<? extends Statement, QueryEvaluationException> getStatements(
+    public CloseableIteration<? extends Statement> getStatements(
             Resource subj, IRI pred, Value obj, Resource... contexts)
             throws QueryEvaluationException {
-        try {
-            RoPredicateStore predicateStore = store.getPredicateStore(pred);
-            if (predicateStore == null)
-                return new EmptyIteration<>();
-            else
-                return new RoFilteredTripleIterator(store, subj, pred, obj, contexts);
-        } catch (IOException ex) {
-            throw new QueryEvaluationException(ex);
+        if (pred != null && store.getPredicateStore(pred) == null) {
+            return new EmptyIteration<>();
         }
+        return new RoFilteredTripleIterator(store, subj, pred, obj, contexts, filter);
     }
 
     @Override

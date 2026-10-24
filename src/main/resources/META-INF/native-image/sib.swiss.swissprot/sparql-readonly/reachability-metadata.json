@@ -1,0 +1,183 @@
+{
+  "reflection": [
+    {
+      "type": "byte[]",
+      "serializable": true
+    },
+    {
+      "type": "com.github.luben.zstd.AutoCloseBase"
+    },
+    {
+      "type": "com.github.luben.zstd.Zstd"
+    },
+    {
+      "type": "com.sun.org.apache.xerces.internal.jaxp.datatype.DatatypeFactoryImpl",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.lang.Boolean",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "getBoolean",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.Number",
+      "serializable": true
+    },
+    {
+      "type": "java.math.BigInteger",
+      "serializable": true
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.binary.BinaryRDFParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.datatypes.DBPediaDatatypeHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.datatypes.GeoSPARQLDatatypeHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.datatypes.RDFDatatypeHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.datatypes.VirtuosoGeometryDatatypeHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.datatypes.XMLSchemaDatatypeHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.jsonld.JSONLDParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.languages.BCP47LanguageHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.languages.RFC3066LanguageHandler"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.n3.N3ParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.ndjsonld.NDJSONLDParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.nquads.NQuadsParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.ntriples.NTriplesParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.rdfjson.RDFJSONParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.rdfxml.RDFXMLParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.trig.TriGParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.trix.TriXParserFactory"
+    },
+    {
+      "type": "org.eclipse.rdf4j.rio.turtle.TurtleParserFactory"
+    },
+    {
+      "type": "sun.security.provider.MD5",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.NativePRNG",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.security.SecureRandomParameters"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.SHA",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.text.resources.CollationData"
+    },
+    {
+      "type": "sun.text.resources.cldr.FormatData"
+    },
+    {
+      "type": "sun.text.resources.cldr.FormatData_en"
+    }
+  ],
+  "resources": [
+    {
+      "glob": "META-INF/services/java.time.zone.ZoneRulesProvider"
+    },
+    {
+      "glob": "META-INF/services/javax.xml.datatype.DatatypeFactory"
+    },
+    {
+      "glob": "META-INF/services/org.eclipse.rdf4j.rio.DatatypeHandler"
+    },
+    {
+      "glob": "META-INF/services/org.eclipse.rdf4j.rio.LanguageHandler"
+    },
+    {
+      "glob": "META-INF/services/org.eclipse.rdf4j.rio.RDFParserFactory"
+    },
+    {
+      "glob": "META-INF/services/org.slf4j.spi.SLF4JServiceProvider"
+    },
+    {
+      "glob": "dev/hardwood/build-info.properties"
+    },
+    {
+      "glob": "linux/amd64/libzstd-jni-1.5.7-9.so"
+    },
+    {
+      "glob": "org/slf4j/impl/StaticLoggerBinder.class"
+    },
+    {
+      "module": "java.base",
+      "glob": "jdk/internal/icu/impl/data/icudt76b/nfc.nrm"
+    },
+    {
+      "module": "java.logging",
+      "glob": "sun/util/logging/resources/logging_en.properties"
+    },
+    {
+      "module": "java.logging",
+      "glob": "sun/util/logging/resources/logging_en_GB.properties"
+    },
+    {
+      "module": "jdk.jfr",
+      "glob": "jdk/jfr/internal/types/metadata.bin"
+    },
+    {
+      "bundle": "sun.util.logging.resources.logging"
+    }
+  ]
+}

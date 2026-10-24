@@ -2,17 +2,11 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.ColumnReaders;
 
-import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
@@ -21,58 +15,55 @@ import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
 public class IriLiteralList extends RoResourceRoValueList<RoIri, RoLiteral> {
 
-    public IriLiteralList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
-    }
 
-    public IriLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
+    public IriLiteralList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        super(file, predicate, dictionaries, hardwood);
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new IriLiteralListIterator(getSchema());
+    public Term.Kind subjectKind() {
+        return Term.Kind.IRI;
     }
 
     @Override
-    protected RoIri getSubject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index], dictionaries.getIriDict());
+    public Term.Kind objectKind() {
+        return Term.Kind.LITERAL;
     }
 
     @Override
-    protected RoLiteral getObject(VectorizedRowBatch batch, int index) {
-        return new RoSimpleLiteral(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getLiteralDict());
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
+        return new IriLiteralListIterator(rows);
     }
 
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    @Override
+    protected RoIri getSubject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
+    }
+
+    @Override
+    protected RoLiteral getObject(long id) {
+        return new RoSimpleLiteral(id, dictionaries.getLiteralDict());
     }
 
     public static class Builder extends AbstractBuilder<RoIri, RoLiteral> {
 
         public Builder(File file, RoIri predicate,
-                RoDictionaries dictionaries, Configuration configuration)
+                RoDictionaries dictionaries, Hardwood hardwood)
                 throws IOException {
-            super(file, predicate, dictionaries, configuration, IriLiteralList::getSchema);
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public IriLiteralList build() throws IOException {
             save();
-            return new IriLiteralList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new IriLiteralList(file, predicate, dictionaries, hardwood);
         }
 
     }
 
     private class IriLiteralListIterator extends RoResourceValueListIterator {
 
-        IriLiteralListIterator(TypeDescription schema) {
-            super(schema);
+        IriLiteralListIterator(ColumnReaders rows) {
+            super(rows);
         }
     }
 }

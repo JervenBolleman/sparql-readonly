@@ -1,10 +1,11 @@
 package sib.swiss.swissprot.sparql.ro.values;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.impl.IntegerLiteral;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
-import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 
 public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
 
@@ -12,6 +13,8 @@ public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
     private final long value;
 
     public RoIntegerLiteral(long value) {
+        // the inherited value methods read the label
+        super(Long.toString(value), XSD.INT, CoreDatatype.XSD.INT);
         this.value = value;
     }
 
@@ -21,8 +24,18 @@ public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
     }
 
     @Override
+    public String getLabel() {
+        return stringValue();
+    }
+
+    @Override
     public IRI getDatatype() {
-        return XMLSchema.INT;
+        return XSD.INT;
+    }
+
+    @Override
+    public CoreDatatype getCoreDatatype() {
+        return CoreDatatype.from(getDatatype());
     }
 
     @Override
@@ -49,11 +62,11 @@ public class RoIntegerLiteral extends SimpleLiteral implements RoLiteral {
 
     @Override
     public String toString() {
-        return '"' + value + "\"^^" + getDatatype();
+        return "\"" + value + "\"^^<" + getDatatype() + ">";
     }
 
     @Override
     public int hashCode() {
-        return toString().hashCode();
+        return stringValue().hashCode();
     }
 }

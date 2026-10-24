@@ -1,49 +1,41 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.CacheWriter;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
-import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.text.Collator;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.CompressionKind;
-import org.apache.orc.OrcFile;
-import org.apache.orc.Reader;
-import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
 
+import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.roaringbitmap.RoaringBitmap;
 
-import sib.swiss.swissprot.sparql.ro.FileNameEncoderFunctions;
-import sib.swiss.swissprot.sparql.ro.RoNamespace;
+import sib.swiss.swissprot.sparql.ro.ParquetTable;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
-import sib.swiss.swissprot.sparql.ro.dictionaries.RoDictionary;
+import sib.swiss.swissprot.sparql.ro.dictionaries.HashIndex;
+import sib.swiss.swissprot.sparql.ro.dictionaries.CompressedValues;
 import sib.swiss.swissprot.sparql.ro.dictionaries.RoIriDictionary;
 
 public class TempIriDictionary extends TempDictionary {
+
+    /**
+     * The file of the local names of the namespaces that are not a prefix and
+     * a number, see {@link CompressedValues}.
+     */
+    public static final String IRIS_FILE = "iris";
+    /**
+     * The {@link HashIndex} of {@link #IRIS_FILE}.
+     */
+    public static final String IRIS_INDEX_FILE = "iris-index";
+    /**
+     * The file of the namespaces.
+     */
+    public static final String NAMESPACES_FILE = "iri-namespaces";
 
     protected static class DataDistribution {
 
@@ -52,6 +44,7 @@ public class TempIriDictionary extends TempDictionary {
         private int minLength = Integer.MAX_VALUE;
         private int maxLength = Integer.MIN_VALUE;
         private boolean allNumericAfterLongestCommonPrefix = true;
+        private boolean seenOnlyDigits = false;
 
         public String measure(String s) {
             if (s.isEmpty()) {
@@ -69,7 +62,9 @@ public class TempIriDictionary extends TempDictionary {
                         String prefix = s.substring(0, i + 1);
                         if (longestCommonPrefix == null) {
                             longestCommonPrefix = prefix;
-                            if (i == a.length - 1) {
+                            // earlier values had no prefix at all
+                            if (i == a.length - 1 || seenOnlyDigits
+                                    || !fitsInInt(s.substring(i + 1))) {
                                 hasCommonPrefix = false;
                                 allNumericAfterLongestCommonPrefix = false;
                             }
@@ -81,16 +76,35 @@ public class TempIriDictionary extends TempDictionary {
                         return s;
                     }
                 }
-            } else if (allNumericAfterLongestCommonPrefix && hasCommonPrefix
-                    && s.startsWith(longestCommonPrefix)) {
-                try {
-                    Integer.parseInt(s.substring(longestCommonPrefix.length()));
-                } catch (NumberFormatException e) {
+                seenOnlyDigits = true;
+                if (!fitsInInt(s)) {
+                    allNumericAfterLongestCommonPrefix = false;
+                    hasCommonPrefix = false;
+                }
+            } else if (allNumericAfterLongestCommonPrefix && hasCommonPrefix) {
+                if (!s.startsWith(longestCommonPrefix)) {
+                    allNumericAfterLongestCommonPrefix = false;
+                    hasCommonPrefix = false;
+                    return s;
+                }
+                if (!fitsInInt(s.substring(longestCommonPrefix.length()))) {
                     allNumericAfterLongestCommonPrefix = false;
                     hasCommonPrefix = false;
                 }
             }
             return s;
+        }
+
+        /**
+         * The numbers are stored in an int bitmap.
+         */
+        private static boolean fitsInInt(String number) {
+            try {
+                Integer.parseInt(number);
+                return true;
+            } catch (NumberFormatException e) {
+                return false;
+            }
         }
 
         public boolean allNumericWithPrefix() {
@@ -99,284 +113,265 @@ public class TempIriDictionary extends TempDictionary {
         }
     }
 
-    private class ClosingCacheWriter implements CacheWriter<File, FileOutputStream> {
+    private final SpillContext spill;
+    private final File namespacesDir;
+    private final Map<String, ProvisionalGroup<String>> byNamespace = new HashMap<>();
+    private final List<ProvisionalGroup<String>> groups = new ArrayList<>();
+    private final List<String> namespaceOfGroup = new ArrayList<>();
+    private final List<DataDistribution> distributionOfGroup = new ArrayList<>();
 
-        private final Map<File, FileOutputStream> fileFosToClose;
-
-        private ClosingCacheWriter(Map<File, FileOutputStream> fileFosToClose) {
-            this.fileFosToClose = fileFosToClose;
-
-        }
-
-        @Override
-        public void write(File key, FileOutputStream value) {
-        }
-
-        @Override
-        public void delete(File key, FileOutputStream value, RemovalCause cause) {
-            fileFosToClose.put(key, value);
-        }
-    }
-    private final Map<String, File> namespacesFile = new HashMap<>();
-    private final Map<File, FileOutputStream> fileFosToClose = new ConcurrentHashMap<>();
-    private final Cache<File, FileOutputStream> fileFosCache = Caffeine.<File, FileOutputStream>newBuilder()
-            .maximumSize(1_000)
-            .initialCapacity(1_000)
-            .writer(new ClosingCacheWriter(fileFosToClose))
-            .build(key -> new FileOutputStream(key, true));
-    private final Cache<IRI, Boolean> iriCache = Caffeine.newBuilder()
-            .maximumSize(10_000)
-            .writer(new CacheWriter<IRI, Boolean>() {
-                @Override
-                public void write(IRI key, Boolean value) {
-
-                }
-
-                @Override
-                public void delete(IRI key, Boolean value, RemovalCause cause) {
-
-                }
-            })
-            .build();
-
-    public TempIriDictionary(File out, Configuration conf) {
-        super(out, conf);
+    public TempIriDictionary(File out, Hardwood hardwood) {
+        this(out, out, hardwood, SpillContext.unbounded(hardwood));
     }
 
-    public void add(IRI subject) throws IOException {
-        if (iriCache.getIfPresent(subject) != null) {
-            return;
-        }
-        iriCache.put(subject, Boolean.TRUE);
-        String namespace = realNamespace(subject);
-        File file = getFileForNamespace(namespace);
-
-        FileOutputStream fos = getFileOutPUtStreamForFile(file);
-        String localname = ensureLocalName(subject, namespace);
-        fos.write(StandardCharsets.UTF_8.encode(localname).array());
-        fos.write('\n');
-        closeEvictedFileOutputStream();
-
+    /**
+     * @param out where the local names are written, see {@link #IRIS_FILE}
+     * @param namespacesDir where the namespaces are written, see
+     * {@link #NAMESPACES_FILE}
+     */
+    public TempIriDictionary(File out, File namespacesDir, Hardwood hardwood, SpillContext spill) {
+        super(out, hardwood);
+        this.namespacesDir = namespacesDir;
+        this.spill = spill;
     }
 
-    private void closeEvictedFileOutputStream() throws IOException {
-        for (Iterator<FileOutputStream> it = fileFosToClose.values().iterator(); it.hasNext();) {
-            FileOutputStream toClose = it.next();
-            toClose.close();
-            it.remove();
+    /**
+     * @return the provisional id of the IRI, see {@link #finalId(long)}
+     */
+    public long add(IRI iri) throws IOException {
+        String namespace = RoIriDictionary.storedNamespace(iri);
+        ProvisionalGroup<String> group = byNamespace.get(namespace);
+        if (group == null) {
+            // measured as values come in: the kind of dictionary has to be
+            // known before the merged values are written
+            DataDistribution distribution = new DataDistribution();
+            group = new ProvisionalGroup<>(groups.size(), ProvisionalGroup.STRINGS, spill,
+                    distribution::measure);
+            byNamespace.put(namespace, group);
+            groups.add(group);
+            namespaceOfGroup.add(namespace);
+            distributionOfGroup.add(distribution);
         }
+        return group.add(RoIriDictionary.storedLocalName(iri));
     }
 
-    private static String ensureLocalName(IRI subject, String namespace) {
-        String localname = subject.getLocalName();
-        if (localname.isEmpty()) {
-            localname = subject.getNamespace().substring(namespace.length());
-        }
-        return localname;
-    }
-
-    private FileOutputStream getFileOutPUtStreamForFile(File file) {
-        FileOutputStream fos = fileFosCache.get(file, (f) -> {
-            try {
-                return new FileOutputStream(f, true);
-            } catch (FileNotFoundException ex) {
-                Logger.getLogger(TempIriDictionary.class.getName()).log(Level.SEVERE, null, ex);
-                throw new RuntimeException(ex);
-            }
-        });
-        return fos;
-    }
-
-    public File getFileForNamespace(String namespace) throws IOException {
-        File file = namespacesFile.get(namespace);
-        if (file == null) {
-            File dir = new File(out, "temp-"
-                    + FileNameEncoderFunctions.encodeNamespace(namespace));
-            dir.mkdir();
-
-            File namespaceFile = new File(dir, "namespace");
-            Files.write(namespaceFile.toPath(), Arrays.asList(namespace));
-            file = new File(dir, "data");
-            namespacesFile.put(namespace, file);
-
-        }
-        return file;
-    }
-
-    public String realNamespace(IRI subject) {
-        String namespace = subject.getNamespace();
-        if (subject.getLocalName().isEmpty()) {
-            namespace = namespace.substring(0, namespace.lastIndexOf("/", namespace.length() - 2) + 1);
-        }
-        return namespace;
+    /**
+     * @return the id in the dictionary {@link #load()} wrote, of the IRI that
+     * got this provisional id
+     */
+    public long finalId(long provisionalId) {
+        return groups.get(ProvisionalGroup.group(provisionalId)).finalId(provisionalId);
     }
 
     @Override
-    public void close() throws IOException {
-        fileFosCache.invalidateAll();
-        closeEvictedFileOutputStream();
+    public void close() {
     }
 
+    /**
+     * Writes the namespaces, the largest first, and the local names of all of
+     * them into one file, and assigns the final ids.
+     */
     public RoIriDictionary load() throws IOException {
-        final List<NamespaceFilePair> bigestNamespaceFirst = namespacesFile
-                .entrySet()
-                .stream()
-                .map(s -> new NamespaceFilePair(s.getKey(), s.getValue())).sorted((f1, f2) -> Long
-                .compare(f2.file.length(), f1.file.length()))
-                .collect(Collectors.toList());
+        List<ProvisionalGroup<String>> biggestFirst = new ArrayList<>(groups);
+        biggestFirst.sort(Comparator.comparingInt((ProvisionalGroup<String> g) -> g.provisionalIds()).reversed());
 
-        RoNamespaces namespaces = new RoNamespaces();
-        RoIriDictionary iriDictionary = new RoIriDictionary(namespaces);
-
-        for (NamespaceFilePair namespaceTempFile : bigestNamespaceFirst) {
-            String namespace = namespaceTempFile.namespace;
-            RoNamespace roNamespace = namespaces.add(null,
-                    namespace);
-            File tempFile = namespaceTempFile.file;
-
-            final Path iripath = new Path(out.getAbsolutePath(), roNamespace.getId() + "-iris");
-            File lengthString = new File(out, roNamespace.getId() + "-prefixed-iris");
-
-            File offsetsFile = new File(out, roNamespace.getId() + "-offsets");
-            DataDistribution data = new DataDistribution();
-            {
-                final List<String> tempNodes = readTempFileIntoMemory(tempFile,
-                        data);
-                writeNamespacesToDisk(tempNodes, offsetsFile, lengthString, iripath,
-                        data, conf);
+        File irisFile = new File(out, IRIS_FILE);
+        File indexFile = new File(out, IRIS_INDEX_FILE);
+        File namespacesFile = new File(namespacesDir, NAMESPACES_FILE);
+        Files.createDirectories(namespacesDir.toPath());
+        Files.deleteIfExists(irisFile.toPath());
+        Files.deleteIfExists(indexFile.toPath());
+        NamespaceRows namespaces = new NamespaceRows(biggestFirst.size());
+        long names = 0;
+        for (ProvisionalGroup<String> group : groups) {
+            if (!distributionOfGroup.get(group.index()).allNumericWithPrefix()) {
+                names += group.provisionalIds();
             }
-            writeToDisk(data, iriDictionary, offsetsFile, lengthString, roNamespace, iripath);
-            removeTempFiles(tempFile);
         }
-        return iriDictionary;
-    }
-
-    private void removeTempFiles(File tempFile) {
-        File parentFile = tempFile.getParentFile();
-        if (!new File(parentFile,"namespace").delete())
-        {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
+        if (biggestFirst.size() > RoNamespaces.MAX_NAMESPACES) {
+            throw new IOException(biggestFirst.size() + " namespaces, more than the " + RoNamespaces.MAX_NAMESPACES
+                    + " IRI ids have room for");
         }
-        if (!tempFile.delete()) {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
-        }
-        if (!parentFile.delete()) {
-            Logger.getAnonymousLogger().warning("Could not delete " + tempFile.getAbsolutePath());
-        }
-    }
-
-    private void writeToDisk(DataDistribution data, RoIriDictionary iriDictionary, File offsetsFile, File lengthString, RoNamespace roNamespace, final Path iripath) throws IOException {
-        if (data.allNumericWithPrefix()) {
-            
-            iriDictionary.addPredixFollowedByBNumberDictionary(offsetsFile, lengthString, roNamespace);
-        } else {
-            
-            File iriFile = new File(out.getAbsolutePath(), roNamespace.getId() + "-iris");
-            if (!iriFile.exists()) {
-                iriFile.createNewFile();
-            }
-            
-            Reader irireader = OrcFile.createReader(iripath, OrcFile.readerOptions(conf));
-            iriDictionary.addBasicRoIriNamespaceDictionary(irireader, roNamespace);
-        }
-    }
-
-    private List<String> readTempFileIntoMemory(File tempFile,
-            DataDistribution data) throws IOException {
-        try (final Stream<String> lines = Files.lines(tempFile.toPath(), StandardCharsets.UTF_8)) {
-
-            return lines
-                    .sorted(Collator.getInstance(Locale.US))
-                    .distinct()
-                    .peek(data::measure)
-                    .collect(Collectors.toList());
-        }
-    }
-
-    private void writeNamespacesToDisk(final List<String> tempNodes, File offsetsFile, File lengthString, Path iriPath, DataDistribution data2, Configuration conf)
-            throws IOException, FileNotFoundException {
-        if (data2.allNumericWithPrefix()) {
-            offsetsFile.createNewFile();
-            lengthString.createNewFile();
-            writeNamespaceWithPrefixedNumbersToDisk(tempNodes, lengthString,
-                    offsetsFile, data2);
-        } else {
-            writeNamespaceWithLongIdsToDisk(tempNodes, iriPath, conf);
-        }
-    }
-
-    private void writeNamespaceWithLongIdsToDisk(final List<String> tempNodes, Path iriPath, Configuration conf)
-            throws IOException, FileNotFoundException {
-        TypeDescription schema = TypeDescription
-                .createStruct()
-                .addField(RoDictionary.ID, TypeDescription.createLong())
-                .addField(RoIriDictionary.IRI_VALUE, TypeDescription.createString());
-        VectorizedRowBatch batch = schema.createRowBatch();
-
-        Iterator<String> iterator = tempNodes.iterator();
-
-        try (Writer writer = OrcFile.createWriter(iriPath,
-                OrcFile.writerOptions(conf)
-                        .bufferSize(500)
-                        .compress(CompressionKind.LZO)
-                        .bloomFilterColumns(RoIriDictionary.IRI_VALUE)
-                        .rowIndexStride(1000)
-                        .setSchema(schema))) {
-            long i = 0;
-            LongColumnVector idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-            BytesColumnVector col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-            while (iterator.hasNext()) {
-                if (batch.size == batch.getMaxSize()) {
-                    writer.addRowBatch(batch);
-                    batch.reset();
-                    idcol = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    col = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+        try (NameWriter iris = new NameWriter(irisFile, indexFile, names)) {
+            for (int id = 0; id < biggestFirst.size(); id++) {
+                ProvisionalGroup<String> group = biggestFirst.get(id);
+                final long namespaceId = id;
+                DataDistribution data = distributionOfGroup.get(group.index());
+                String namespace = namespaceOfGroup.get(group.index());
+                if (data.allNumericWithPrefix()) {
+                    // the id is the number after the prefix
+                    final String prefix = data.longestCommonPrefix == null ? "" : data.longestCommonPrefix;
+                    final RoaringBitmap numbers = new RoaringBitmap();
+                    group.finish(localName -> {
+                        int number = Integer.parseInt(localName.substring(prefix.length()));
+                        numbers.add(number);
+                        return RoNamespaces.iriId(namespaceId, number);
+                    });
+                    namespaces.addNumbers(id, namespace, prefix, data.minLength, numbers);
+                } else {
+                    // the local id is the id of the name in the compressed
+                    // names, from the start of the namespace
+                    final long start = iris.start(namespaceId);
+                    group.finish(localName -> iris.add(localName));
+                    CompressedValues.Ids ids = iris.endNamespace();
+                    group.mapFinalIds(index -> RoNamespaces.iriId(namespaceId, local(ids.id(index), start)));
+                    namespaces.addNames(id, namespace, start, iris.position());
                 }
-
-                idcol.vector[batch.size] = i++;
-                final byte[] bytes = iterator.next().getBytes();
-                col.setVal(batch.size++, bytes);
             }
-            writer.addRowBatch(batch);
+        }
+        namespaces.write(namespacesFile);
+        return RoIriDictionary.open(namespacesFile, irisFile, indexFile, hardwood);
+    }
+
+    /**
+     * The rows of the namespace table, see
+     * {@link RoIriDictionary#NAMESPACES_SCHEMA}.
+     */
+    private static final class NamespaceRows {
+
+        private final long[] ids;
+        private final byte[][] namespaces;
+        private final byte[][] prefixes;
+        private final int[] lengths;
+        private final byte[][] numbers;
+        private final boolean[] names;
+        private final long[] starts;
+        private final long[] ends;
+        private int size;
+
+        private NamespaceRows(int capacity) {
+            ids = new long[capacity];
+            namespaces = new byte[capacity][];
+            prefixes = new byte[capacity][];
+            lengths = new int[capacity];
+            numbers = new byte[capacity][];
+            names = new boolean[capacity];
+            starts = new long[capacity];
+            ends = new long[capacity];
+        }
+
+        /**
+         * @param start the offset of the first name of the namespace
+         * @param end the offset after its last name
+         */
+        void addNames(long id, String namespace, long start, long end) {
+            ids[size] = id;
+            namespaces[size] = namespace.getBytes(StandardCharsets.UTF_8);
+            names[size] = true;
+            starts[size] = start;
+            ends[size] = end;
+            size++;
+        }
+
+        void addNumbers(long id, String namespace, String prefix, int length, RoaringBitmap bitmap) {
+            ids[size] = id;
+            namespaces[size] = namespace.getBytes(StandardCharsets.UTF_8);
+            prefixes[size] = prefix.getBytes(StandardCharsets.UTF_8);
+            lengths[size] = length;
+            bitmap.runOptimize();
+            ByteBuffer serialized = ByteBuffer.allocate(bitmap.serializedSizeInBytes());
+            bitmap.serialize(serialized);
+            numbers[size] = serialized.array();
+            size++;
+        }
+
+        /**
+         * @return true for the namespaces of numbers, which have no names
+         */
+        private boolean[] numbersNotNames() {
+            boolean[] numbers = new boolean[names.length];
+            for (int i = 0; i < names.length; i++) {
+                numbers[i] = !names[i];
+            }
+            return numbers;
+        }
+
+        void write(File file) throws IOException {
+            if (size == 0) {
+                Files.deleteIfExists(file.toPath());
+                return;
+            }
+            try (ParquetTable.Writer writer = new ParquetTable.Writer(file, RoIriDictionary.NAMESPACES_SCHEMA)) {
+                writer.writeBatch(b -> b.longs(RoIriDictionary.NAMESPACE_ID, ids)
+                        .bytes(RoIriDictionary.NAMESPACE_IRI, namespaces)
+                        .bytes(RoIriDictionary.NUMBER_PREFIX, prefixes, names)
+                        .ints(RoIriDictionary.NAME_LENGTH, lengths, names)
+                        .bytes(RoIriDictionary.NUMBERS, numbers, names)
+                        .longs(RoIriDictionary.NAMES_START, starts, numbersNotNames())
+                        .longs(RoIriDictionary.NAMES_END, ends, numbersNotNames()));
+            }
         }
     }
 
-    private void writeNamespaceWithPrefixedNumbersToDisk(
-            final List<String> tempNodes, File lengthString, File offsetsFile,
-            DataDistribution data2) throws IOException, FileNotFoundException {
-        RoaringBitmap map = new RoaringBitmap();
-        int start = 0;
-        String longestCommonPrefix = data2.longestCommonPrefix;
-        if (longestCommonPrefix != null) {
-            start = data2.longestCommonPrefix.length();
-        } else {
-            longestCommonPrefix = "";
+    /**
+     * @param id the id of a name in the compressed names
+     * @param start the offset where the names of its namespace start
+     * @return its local id
+     */
+    private static long local(long id, long start) {
+        long local = id - CompressedValues.idAt(start);
+        if (local > RoNamespaces.LOCAL_MASK) {
+            throw new IllegalStateException("The compressed local names of a namespace take more than "
+                    + (RoNamespaces.LOCAL_MASK >>> CompressedValues.BATCH_BITS) + " bytes, which local ids can not address");
         }
-        for (int i = 0; i < tempNodes.size(); i++) {
-            map.add(Integer.parseInt(tempNodes.get(i).substring(start)));
-        }
-        try (DataOutputStream dos = new DataOutputStream(
-                new FileOutputStream(lengthString))) {
-            map.serialize(dos);
-        }
-        List<String> info = Arrays.asList(new String[]{
-            String.valueOf(longestCommonPrefix.length()),
-            longestCommonPrefix, String.valueOf(data2.minLength),
-            String.valueOf(data2.maxLength)});
-        Files.write(offsetsFile.toPath(), info, StandardCharsets.UTF_8);
-
+        return local;
     }
 
-    private final class NamespaceFilePair {
-
-        private final String namespace;
+    /**
+     * Writes the local names, see {@link CompressedValues}, and their
+     * {@link HashIndex}. Without names there are no files.
+     */
+    private static final class NameWriter implements java.io.Closeable {
 
         private final File file;
+        private final HashIndex.Writer index;
+        private final CompressedValues.Writer names;
+        private long namespace;
+        private boolean any;
 
-        public NamespaceFilePair(String s, File file) {
-            this.namespace = s;
+        private NameWriter(File file, File indexFile, long expected) throws IOException {
             this.file = file;
+            this.index = expected == 0 ? null : new HashIndex.Writer(indexFile, expected);
+            this.names = new CompressedValues.Writer(file,
+                    (name, id) -> index.add(HashIndex.hash(name, namespace), id));
+        }
+
+        /**
+         * Starts the names of a namespace.
+         *
+         * @return the offset where they start
+         */
+        long start(long namespace) {
+            this.namespace = namespace;
+            return names.position();
+        }
+
+        /**
+         * @return the index of the name in its namespace, see
+         * {@link #endNamespace()}
+         */
+        long add(String localName) throws IOException {
+            any = true;
+            return names.add(localName.getBytes(StandardCharsets.UTF_8));
+        }
+
+        CompressedValues.Ids endNamespace() throws IOException {
+            return names.endGroup();
+        }
+
+        long position() {
+            return names.position();
+        }
+
+        @Override
+        public void close() throws IOException {
+            names.close();
+            if (index != null) {
+                index.close();
+            }
+            if (!any) {
+                Files.deleteIfExists(file.toPath());
+            }
         }
     }
-
 }

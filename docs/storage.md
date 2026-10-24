@@ -1,0 +1,365 @@
+# Storage
+
+What a sparql-readonly store holds on disk, how the files refer to each
+other, and how reading a statement pattern uses them. This describes what is
+implemented; [loading.md](loading.md) describes how the files are written.
+
+The numbers are from a store of `taxonomy.rdf` (16.5M triples, 21
+predicates): 230 MB on disk in 72 files, see "What the store consists of".
+
+## Layout
+
+The triple lists, the namespaces and the big integers are Parquet, written
+with [hardwood](https://hardwood.dev), compressed with zstd. The local names
+of IRIs and the literals are compressed with FSST in batches of 128 values,
+each with a hash index, see "Dictionaries". The other files are small binary or
+text files.
+
+```mermaid
+flowchart LR
+    store["#lt;store#gt;/"]
+    store --> ns["namespaces/"]
+    store --> iri["iriDictionaries/"]
+    store --> other["otherValueDictionaries/"]
+    store --> num["numberDictionaries/"]
+    store --> lists["predicateLists/"]
+    store --> wide["wideTables/"]
+    ns --> nsfile["iri-namespaces<br/><i>Parquet, one row per IRI namespace</i>"]
+    ns --> prefixes["prefixes<br/><i>text, prefixes declared in the data</i>"]
+    iri --> iris["iris<br/><i>the local names of<br/>all namespaces of names</i>"]
+    iri --> irisindex["iris-index<br/><i>hash index of iris</i>"]
+    other --> literals["literals<br/><i>the labels of all literals</i>"]
+    other --> litgroups["literal-groups<br/><i>datatype and language<br/>of each run of labels</i>"]
+    other --> litindex["literals-index<br/><i>hash index of literals</i>"]
+    num --> integers["integer_dict<br/><i>Parquet, big integers</i>"]
+    lists --> pred["#lt;URL-encoded predicate IRI#gt;/<br/><i>one per predicate, see below</i>"]
+    wide --> table["table-#lt;n#gt;<br/><i>Parquet, triple lists merged<br/>on their subjects, see below</i>"]
+```
+
+A directory or file that would be empty is not there: a store without big
+integers has no `numberDictionaries/`, one without literals no
+`otherValueDictionaries/`.
+
+Inside each predicate directory, per non-empty triple list `<list>`:
+
+```mermaid
+flowchart LR
+    pred["#lt;URL-encoded predicate IRI#gt;/"]
+    pred --> predfile["predicate<br/><i>8 bytes: the predicate's IRI id</i>"]
+    pred --> list["#lt;list#gt;<br/><i>Parquet: triples sorted by subject</i>"]
+    pred --> byobj["#lt;list#gt;-by-object<br/><i>Parquet: the same triples, sorted by object</i>"]
+    pred --> widefile["#lt;list#gt;-wide<br/><i>text: the wide table and column<br/>that replace #lt;list#gt;</i>"]
+```
+
+### Triple lists
+
+Each predicate has a directory with up to 13 triple lists, one per kind of
+subject and kind of object. Only lists with triples have files.
+
+| Subject \ object | IRI | blank node | dictionary literal | `xsd:int` | boolean | `xsd:integer` |
+| --- | --- | --- | --- | --- | --- | --- |
+| **IRI** | `iri_iri` | `iri_bnode` | `iri_literal` | `iri_integer` | `iri_boolean` | `iri_big_integer` |
+| **blank node** | `bnode_iri` | `bnode_bnode` | `bnode_literal`, `bnode_string` | `bnode_integer` | `bnode_boolean` | `bnode_big_integer` |
+
+A list file has two columns, `subject` and `object`, both `INT64` ids (see
+"Ids"). It is sorted by subject, then object, and holds every triple once.
+Its `-by-object` copy holds the same triples sorted by object, then subject.
+Row groups hold 64k triples, in pages of 1024. Statistics on the sorted
+column let a lookup skip all but the row group that holds its value, and the
+page index all but the pages that do. The sorted column is
+`DELTA_BINARY_PACKED`, not dictionary encoded: otherwise the reader reads the
+dictionary of each row group a lookup reaches to check for the value, which
+the statistics already decide. `-Dsparql.ro.tripleRowGroupRows` and
+`-Dsparql.ro.triplePageRows` change the two sizes at load time.
+
+### Graphs
+
+A list with triples in named graphs has a `BOOLEAN` column per graph, true
+for the triples in that graph, and one for the default graph:
+
+| Column | Graph |
+| --- | --- |
+| `g_i<id>` | the IRI with this id |
+| `g_b<id>` | the blank node with this id |
+| `g_default` | the default graph |
+
+A triple in several graphs is one row with several of these true. A list
+whose triples are all in the default graph has none of these columns. Its
+`-by-object` copy has the same columns. A statement is read once per graph
+it is in, with that graph as its context, as RDF4J's own stores do: a
+pattern on the default graph, the union of all graphs, sees a triple in two
+graphs twice.
+
+### Wide tables
+
+Lists with one object per subject whose subjects largely overlap are
+merged into one wide table: a `subject` column and one
+`INT64` column of objects per list, `p0`, `p1`, …, null where a subject has
+no triple in that list, each followed by the graph columns of its list,
+prefixed with its name: `p0_g_i<id>`, `p0_g_default`, …. The subjects, otherwise stored in each of these
+lists, are stored once. A merged list keeps its `-by-object` copy; its file
+sorted by subject is replaced by `<list>-wide`, a line with the table's path
+relative to the predicate directory, a tab, and the column.
+
+Merged lists may be in different named graphs, and a triple in several
+graphs is one row, so a list is merged whatever its graphs. Each keeps its
+own graph columns.
+
+Which lists are merged is set by `RoStore.setWideTableOverlap(percent)`, or
+`-Dsparql.ro.wideTableOverlap` for `Loader`, default 90. Lists are taken
+from the most triples to the fewest; each joins the table, of lists with
+the same kind of subject, whose subjects it overlaps most, if
+|A ∩ B| / |A ∪ B| is at least the setting, or starts a table of its own. A
+table needs two lists. At 0 every such list with IRI subjects ends up in one
+table, and those with blank node subjects in another; above 100 nothing is
+merged.
+
+On the taxonomy store:
+
+| Overlap | Tables | Lists merged | Store |
+| --- | --- | --- | --- |
+| none (101) | 0 | 0 | 100 MiB, 67 files |
+| 90 | 2: `type` + `partOfLineage`, `scientificName` + `subClassOf` | 4 | 95 MiB, 69 files |
+| 0 | 1 | 11 | 90 MiB, 68 files |
+
+### Dictionaries
+
+The local names of IRIs and the labels of literals are each in a file of
+values compressed with [FSST](https://github.com/cwida/fsst), through
+fsst4j (`swiss.sib.swissprot:fsst4j`), which decompresses each
+value on its own (`CompressedValues`). The values are in batches of 128.
+The id of a value is the offset of its batch in the file, shifted left by
+7 bits, plus its index in the batch:
+
+```
+id = batch offset << 7 | index in the batch
+```
+
+Batches come in segments of up to 64 that share an FSST symbol table, built
+from the values of the segment: the table, in FSST's `fsst_export` format,
+then the batches. A group of values, the names of one namespace or the
+labels of one language or datatype, starts a new segment, so a batch holds
+values of one group only, and all batches of a group but its last are
+full. A batch is
+
+| Field | Size |
+| --- | --- |
+| distance back to the symbol table of its segment | LEB128 varint |
+| number of values, less one | 1 byte |
+| compressed length of each value | a LEB128 varint each |
+| the compressed values | |
+
+Reading a value reads the lengths of its batch up to its own and
+decompresses it with the symbol table of its segment; the tables are read
+from the memory map once and kept.
+
+| File | Holds | Sorted by |
+| --- | --- | --- |
+| `iriDictionaries/iris` | the local names of the namespaces of names, one namespace after the other | namespace, then local name |
+| `otherValueDictionaries/literals` | the labels of the literals, one language or datatype after the other | label, within each language or datatype |
+| `otherValueDictionaries/literal-groups` | per language or datatype: the offset where its labels start, the datatype, the language | offset |
+| `namespaces/iri-namespaces` | Parquet: `id`, `namespace`; for a namespace of names `names_start` and `names_end`, its part of `iris`; for a prefix-and-number namespace `number_prefix`, `name_length`, `numbers` | id |
+| `numberDictionaries/integer_dict` | Parquet: `id_col` INT64, delta encoded, `int_long_value` string, 64k-row row groups in pages of 1024 | numeric value |
+
+`iris-index` and `literals-index` find the id of a value by its text
+(`HashIndex`): a long with the number of slots, a power of two, then the
+slots, at most 70% in use, filled by linear probing. A slot is 0 when empty,
+otherwise 16 bits of the hash of its value above the id of the value plus
+one, in 48 bits, so ids go up to 2^48, files of values up to 2 TiB, and
+most other values in a probe are passed over on their hash bits alone. The hash is of the UTF-8
+bytes and of the group of the value, its namespace or its language or
+datatype, and a match must also lie in the part of the file of that group.
+
+A namespace whose local names are all one prefix followed by a number of one
+length (`GO_0005634`) has no names in `iris`: its row in `iri-namespaces`
+holds the prefix, the length and a serialized `RoaringBitmap` of the numbers
+present.
+
+`RoStore.init()` on a directory that holds a store opens all of these, so a
+store can be loaded by one process and read by another.
+
+## Ids
+
+Every value in a triple list is a 64-bit id. Which dictionary, if any, gives
+its value follows from the list it is in.
+
+| Kind | Id |
+| --- | --- |
+| IRI | `namespace (24 bits) \| local id (40 bits)`: the local id is the id of the name in `iris` less the id where the names of its namespace start, or the number after the prefix. Namespaces are numbered largest first. |
+| blank node | a number given while loading |
+| dictionary literal | the id of its label in `literals` |
+| `xsd:int` | the value |
+| boolean | 1 or 0 |
+| `xsd:integer` | the value if it is a long without the high bit; otherwise the row in `integer_dict` with the high bit set |
+
+```mermaid
+flowchart LR
+    row["triple list row<br/>subject id | object id"]
+    row -->|IRI| split["high 24 bits: namespace<br/>low 40 bits: local id"]
+    split --> nsfile["batch and index in iris,<br/>from the start of the namespace,<br/>or prefix + number"]
+    row -->|literal| lit["batch and index<br/>in literals"]
+    row -->|"xsd:integer,<br/>high bit set"| big["integer_dict row"]
+    row -->|"xsd:int, boolean,<br/>small xsd:integer,<br/>blank node"| self["the id is the value"]
+```
+
+## Reading a statement pattern
+
+```mermaid
+flowchart TD
+    pattern["?s p ?o with what is bound,<br/>FILTERs on ?o and the graphs"] --> resolve["resolve bound values once<br/>to kind and id (Term)"]
+    resolve -->|"not in the store"| empty["no statements"]
+    resolve --> select["predicate directories:<br/>the one of p, or all"]
+    select --> kinds["lists whose subject and object kind<br/>match the bound values,<br/>that a pushed FILTER can match,<br/>and that have triples in the graphs"]
+    kinds --> which{"what is bound?"}
+    which -->|"the subject"| so["#lt;list#gt;<br/>filter on subject (and object)"]
+    which -->|"only the object,<br/>or a FILTER on it"| os["#lt;list#gt;-by-object<br/>filter on object"]
+    which -->|nothing| scan["#lt;list#gt;, all rows"]
+    so --> rows["rows of ids → Ro values,<br/>a statement per graph,<br/>decoded from the dictionaries<br/>when they are used"]
+    os --> rows
+    scan --> rows
+```
+
+Bound values that came from this store, as in a join, carry their id;
+others are looked up in the dictionaries once per pattern. A FILTER that
+compares the object with a number, or with a boolean, is pushed down as a
+range or set on the object column of the lists where values are stored as
+themselves, and rules out lists that can not match; the FILTER itself is
+still applied to what is read.
+
+Asked for some graphs, as by `GRAPH <g> { … }`, `FROM` or `getStatements`
+with contexts, a list reads only the graph columns of those graphs, and
+only the rows where one of them is true. A list without graph columns is
+read only for the default graph.
+
+Literals and the local names of IRIs are decompressed from their batch in
+the memory mapped files, and a literal keeps its label once read. A value in a query
+is found by text through the hash index of its dictionary.
+
+On the taxonomy store, against the dictionaries in Parquet; FSST takes the
+uncompressed linear layout's reading of all 2.4 million names with their
+subjects from 1.1 to 1.8 s, and finding 10 000 IRIs or literals by text
+stays at 11 to 13 ms:
+
+| | Parquet | Linear and hash index |
+| --- | --- | --- |
+| reading 100 000 names with their subjects | 33 s | 0.4 s |
+| finding 10 000 IRIs by text | 9.3 s | 17 ms |
+| finding 10 000 literals by text | 12.8 s | 15 ms |
+| `getStatements` by subject IRI, 10 000 times | 26 s | 19 s |
+| all 1.9 million species with name and parent, read as text | not done in 25 min | 3.7 s |
+
+What is left of a `getStatements` with a constant is the lookup in the
+triple list. On the taxonomy store, best of six rounds of 10 000 lookups (1000
+for all of a subject), with the lists in row groups of 4096 and with the
+layout above:
+
+| | 4096-row row groups | 64k-row row groups, pages of 1024, delta encoded sorted column |
+| --- | --- | --- |
+| one subject and predicate | 0.49 ms | 0.19 ms |
+| one object and predicate | 0.42 ms | 0.18 ms |
+| all statements of one subject | 4.7 ms | 4.4 ms |
+| scanning all 16.6 million statements | 2.2 s | 1.8 to 2.4 s |
+| store size | 224 MB | 212 MB |
+| sorting and writing the triple lists | 27 s | 14 s |
+
+Most of a lookup is now hardwood planning the read: checking the column
+paths, parsing the offset index of the row group, and finding the codec.
+
+On the taxonomy store: one subject and predicate, 6 ms; one object and
+predicate (3 statements), 5 ms; all statements of one subject, 68 ms.
+
+### Stars of patterns
+
+Patterns that are joined and share an unbound subject variable, such as
+`?s up:scientificName ?name ; up:rank ?rank ; rdfs:subClassOf ?parent`,
+are evaluated together (`StarJoinOptimizer`, `StarJoinStep`):
+
+- with the subject bound by an enclosing join, each pattern is a lookup of
+  that subject;
+- if a pattern with a bound object has at most 1000 triples, its subjects
+  are looked up in the other patterns;
+- otherwise the lists of all patterns, sorted by subject, are read once and
+  merged, with bound objects as filters on those lists: a subject every
+  pattern has gives the combinations of its objects. Patterns whose list
+  is a column of the same wide table are read together, as one pass over
+  that table with a filter that their columns are not null (or equal to
+  the bound object): each row is already a subject with all their objects.
+
+On the taxonomy store all 1.9 million species with their name and parent
+take 4 s; one lookup per pattern per species, as a nested loop join does,
+takes about 8.5 ms per row, hours in all.
+
+Counting the 2.1 million taxa with a name, rank, parent and lineage flag:
+
+| Overlap | Time |
+| --- | --- |
+| none | 3.9 s |
+| 90 (`rank` not merged) | 3.3 s |
+| 0 (all four in one table) | 2.5 s |
+
+Most of what is left is building RDF4J binding sets, not reading the
+store.
+
+## What the store consists of
+
+With the dictionaries compressed with FSST and indexed, the taxonomy store
+is 230 MB in 72 files. FSST halves the local names, from 23.0 to 12.9 MB,
+and the literals, from 98.6 to 47.7 MB; the hash indexes, 101 MB, are now
+the larger part. With the dictionaries in Parquet the store was 100 MiB, of
+which 35 MB dictionaries.
+
+```mermaid
+pie showData
+    title taxonomy.rdf store, MB on disk
+    "literals index" : 67.1
+    "literals" : 47.7
+    "triples by object" : 36.2
+    "IRI local names index" : 33.6
+    "triples by subject" : 32.1
+    "IRI local names" : 12.9
+    "IRI namespaces" : 0.4
+```
+
+## Duplication, and how it was removed
+
+The first version of this store, at 583 MiB and about 27 000 files, held:
+
+1. **A copy of the namespace table next to every triple list,** also lists
+   without triples: 273 identical files of 1.46 MB, two thirds of the store,
+   that nothing read, and 26 of the 40 seconds of writing the triple lists.
+   The table is now written once, as `namespaces/iri-namespaces`, and read
+   by `RoStore.init()`.
+2. **Two context files per list, also without named graphs:** 546 files.
+   The graphs of a list are now columns in it, only if it has triples in a
+   named graph.
+3. **One dictionary file per namespace:** 25 912 files holding 11.7 MB in
+   111 MB of filesystem blocks. All local names are now in one file, `iris`,
+   and the prefix-and-number namespaces in the rows of `iri-namespaces`.
+4. **Directories that were never written** are no longer created, and a
+   load removes the directories it left empty.
+
+Together this brought the store to 100 MiB in 67 files, and loading from
+137 to 110 s. Lookups that resolve an IRI became about 2 ms slower, as the
+IRI file is now shared by all namespaces; large namespaces could get a file
+of their own again if that matters.
+
+What is still duplicated:
+
+- **The copy sorted by object,** 34 MB, every triple twice. It is what makes
+  lookups by object fast, so it is worth its size for large lists. For lists
+  of one row group, 64k triples or less, it gains nothing: 12 of the 21
+  taxonomy lists, though only 1.2 MB of the 34. These could skip it, as
+  could lists with a single distinct object.
+- **The same subjects in the lists of several predicates,** for lists with
+  one object per subject, is removed by the wide tables, as far as their
+  overlap setting allows. Lists with several objects per subject still
+  each store their subjects.
+- `bnode_string` lists are never filled: loading puts blank node subjects
+  with literal objects in `bnode_literal`.
+
+## Limitations
+
+- The hash indexes of local names and literals take 8 bytes per slot.
+- The compressed local names of one namespace can take at most 8 GiB, as
+  their batch offset, shifted by 7 bits, is in the 40-bit local id; there
+  can be at most 2^24 namespaces. A load that needs more fails.

@@ -7,6 +7,8 @@ import java.util.Optional;
 import javax.xml.datatype.XMLGregorianCalendar;
 
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
+import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.datatypes.XMLDatatypeUtil;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
@@ -19,10 +21,23 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
     private static final long serialVersionUID = 1L;
     private final RoLiteralDict dict;
     private final long id;
+    /**
+     * The label once read: asked for by hashing, comparing and writing.
+     */
+    private transient String label;
 
     public RoSimpleLiteral(long id, RoLiteralDict roLiteralDict) {
         this.id = id;
         this.dict = roLiteralDict;
+    }
+
+    /**
+     * As {@link org.eclipse.rdf4j.model.Literal#hashCode()} requires, the
+     * hash of the label.
+     */
+    @Override
+    public int hashCode() {
+        return getLabel().hashCode();
     }
 
     @Override
@@ -32,12 +47,17 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
 
     @Override
     public String stringValue() {
-        return dict.stringValue(id);
+        return getLabel();
     }
 
     @Override
     public String getLabel() {
-        return dict.stringValue(id);
+        String read = label;
+        if (read == null) {
+            read = dict.stringValue(id);
+            label = read;
+        }
+        return read;
     }
 
     /**
@@ -55,8 +75,9 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
 
         if (Literals.isLanguageLiteral(this)) {
             sb.append('@');
-            sb.append(getLanguage());
-        } else {
+            sb.append(getLanguage().get());
+        } else if (!XSD.STRING.equals(getDatatype())) {
+            // as RDF4J, a plain string shows without its datatype
             sb.append("^^<");
             sb.append(getDatatype().toString());
             sb.append(">");
@@ -74,6 +95,11 @@ public class RoSimpleLiteral extends SimpleLiteral implements RoLiteral {
     @Override
     public IRI getDatatype() {
         return dict.dataType(id);
+    }
+
+    @Override
+    public CoreDatatype getCoreDatatype() {
+        return CoreDatatype.from(getDatatype());
     }
 
     @Override

@@ -1,11 +1,10 @@
 package sib.swiss.swissprot.sparql.ro;
 
 enum RoDirectories {
-	PREDICATE_LISTS("predicateLists"), IRI_DICTIONARIES("iriDictionaries"), BNODE_DICTIONARIES(
-			"bnodeDictionaries"), NUMBERIC_VALUE_DICTIONARIES(
-			"numberDictionaries"), STRING_DICTIONARY("stringDictionaries"), LANG_STRING_DICTIONARIES(
-			"langStringDictionaries"), OTHER_VALUE_DICTIONARIES(
-			"otherValueDictionaries"), NAMESPACES("namespaces");
+	PREDICATE_LISTS("predicateLists"), IRI_DICTIONARIES("iriDictionaries"),
+			NUMBERIC_VALUE_DICTIONARIES("numberDictionaries"),
+			OTHER_VALUE_DICTIONARIES("otherValueDictionaries"), NAMESPACES("namespaces"),
+			WIDE_TABLES("wideTables");
 
 	private final String directoryName;
 

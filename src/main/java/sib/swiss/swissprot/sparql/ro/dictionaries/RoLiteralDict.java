@@ -1,137 +1,168 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
-import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
-import org.apache.orc.Reader;
-import org.apache.orc.RecordReader;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.vocabulary.XMLSchema;
+import org.eclipse.rdf4j.model.util.Values;
 
 import sib.swiss.swissprot.sparql.ro.values.RoLiteral;
 import sib.swiss.swissprot.sparql.ro.values.RoSimpleLiteral;
 
-public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
+/**
+ * The literals that are not stored as themselves in the triple lists. Their
+ * labels are in {@link CompressedValues}, grouped by language, or by
+ * datatype for literals without one, and sorted within a group. The id of a
+ * literal is the id of its label there. The groups are in a small file of
+ * their own, {@link #GROUPS_FILE}, and a {@link HashIndex} finds the id of a
+ * literal.
+ */
+public class RoLiteralDict implements Closeable {
 
+    /**
+     * The labels.
+     */
     public static final String PATH_NAME = "literals";
-    public static final String LABEL = "label";
-    public static final String DATATYPE_ID = "datatype_id";
-    public static final String LANGUAGE = "language";
+    /**
+     * Per group, in the order of the labels: the offset where its labels
+     * start, its datatype and its language, if it has one.
+     */
+    public static final String GROUPS_FILE = "literal-groups";
+    /**
+     * The {@link HashIndex} of the labels.
+     */
+    public static final String INDEX_FILE = "literals-index";
 
-    private static final IRI[] DATA_TYPES = new IRI[]{XMLSchema.ANYURI,
-        XMLSchema.BASE64BINARY, XMLSchema.BOOLEAN, XMLSchema.BYTE,
-        XMLSchema.DATE, XMLSchema.DATETIME, XMLSchema.DAYTIMEDURATION,
-        XMLSchema.DECIMAL, XMLSchema.DOUBLE, XMLSchema.DURATION,
-        XMLSchema.ENTITIES, XMLSchema.ENTITY, XMLSchema.FLOAT,
-        XMLSchema.GDAY, XMLSchema.GMONTH, XMLSchema.GMONTHDAY,
-        XMLSchema.GYEAR, XMLSchema.GYEARMONTH, XMLSchema.HEXBINARY,
-        XMLSchema.ID, XMLSchema.IDREF, XMLSchema.IDREFS, XMLSchema.INT,
-        XMLSchema.INTEGER, XMLSchema.LANGUAGE, XMLSchema.LONG,
-        XMLSchema.NAME, XMLSchema.NCNAME, XMLSchema.NEGATIVE_INTEGER,
-        XMLSchema.NMTOKEN, XMLSchema.NMTOKENS,
-        XMLSchema.NON_NEGATIVE_INTEGER, XMLSchema.NON_POSITIVE_INTEGER,
-        XMLSchema.NORMALIZEDSTRING, XMLSchema.NOTATION,
-        XMLSchema.POSITIVE_INTEGER, XMLSchema.QNAME, XMLSchema.SHORT,
-        XMLSchema.STRING, XMLSchema.TIME, XMLSchema.TOKEN,
-        XMLSchema.UNSIGNED_BYTE, XMLSchema.UNSIGNED_INT,
-        XMLSchema.UNSIGNED_LONG, XMLSchema.UNSIGNED_SHORT,
-        XMLSchema.YEARMONTHDURATION};
-
-    public static final int DATATYPE_COL = RoDictionary.VALUE_COL + 1;
-    public static final int LANGUAGE_COL = DATATYPE_COL + 1;
-
-    public RoLiteralDict(Reader reader) {
-        super(reader);
+    /**
+     * A datatype or language and the offset where its labels start.
+     */
+    public record Group(long start, IRI datatype, String language) {
     }
 
-    @Override
-    public Optional<RoLiteral> find(Literal value) {
-        try {
-            IRI dt = value.getDatatype();
-            int dtIndex = -1;
-            SearchArgument.Builder builder = SearchArgumentFactory.newBuilder()
-                    .equals(LABEL, PredicateLeaf.Type.STRING, value.stringValue());
-            if (dt != null) {
-                dtIndex = datatypeCode(value.getDatatype());
-                builder = builder.equals(DATATYPE_ID, PredicateLeaf.Type.LONG, (long) dtIndex)
-                        .isNull(LANGUAGE, PredicateLeaf.Type.STRING);
+    private final CompressedValues labels;
+    private final HashIndex index;
+    private final long[] starts;
+    private final List<Group> groups;
+    private final Map<String, Integer> byLanguage = new HashMap<>();
+    private final Map<String, Integer> byDatatype = new HashMap<>();
 
+    private RoLiteralDict(CompressedValues labels, HashIndex index, List<Group> groups) {
+        this.labels = labels;
+        this.index = index;
+        this.groups = groups;
+        this.starts = new long[groups.size()];
+        for (int g = 0; g < groups.size(); g++) {
+            Group group = groups.get(g);
+            starts[g] = CompressedValues.idAt(group.start());
+            if (group.language() != null) {
+                byLanguage.put(group.language(), g);
             } else {
-                builder = builder
-                        .equals(LANGUAGE, PredicateLeaf.Type.STRING, value.getLanguage().orElse(""))
-                        .isNull(DATATYPE_ID, PredicateLeaf.Type.LONG);
+                byDatatype.put(group.datatype().stringValue(), g);
             }
+        }
+    }
 
-            final Reader.Options options = new Reader.Options()
-                    .include(new boolean[]{true, true, true, true, true})
-                    .searchArgument(builder.build(), new String[]{LABEL, DATATYPE_ID, LANGUAGE});
+    /**
+     * @return the dictionary in the directory, empty if it has none
+     */
+    public static RoLiteralDict open(File directory) throws IOException {
+        List<Group> groups = readGroups(new File(directory, GROUPS_FILE));
+        CompressedValues labels = CompressedValues.open(new File(directory, PATH_NAME));
+        try {
+            return new RoLiteralDict(labels, HashIndex.open(new File(directory, INDEX_FILE)), groups);
+        } catch (IOException | RuntimeException e) {
+            labels.close();
+            throw e;
+        }
+    }
 
-            try (RecordReader rows = reader.rows(options)) {
-                VectorizedRowBatch batch = schema.createRowBatch();
-                boolean nextBatch = rows.nextBatch(batch);
-                while (nextBatch) {
-                    final LongColumnVector id = (LongColumnVector) batch.cols[RoDictionary.ID_COL];
-                    final BytesColumnVector bcv = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
+    private static List<Group> readGroups(File file) throws IOException {
+        List<Group> groups = new ArrayList<>();
+        if (!file.exists()) {
+            return groups;
+        }
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {
+            int size = in.readInt();
+            for (int g = 0; g < size; g++) {
+                long start = in.readLong();
+                IRI datatype = Values.iri(in.readUTF());
+                String language = in.readBoolean() ? in.readUTF() : null;
+                groups.add(new Group(start, datatype, language));
+            }
+        }
+        return groups;
+    }
 
-                    for (int i = 0; i < batch.size; i++) {
-                        if (dt != null) {
-                            final LongColumnVector dtId = (LongColumnVector) batch.cols[DATATYPE_COL];
-                            if (dtId.vector[i] == dtIndex && new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())) {
-                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
-                            }
-                        } else {
-                            final BytesColumnVector lang = (BytesColumnVector) batch.cols[LANGUAGE_COL];
-                            if (new String(bcv.vector[i], bcv.start[i], bcv.length[i]).equals(value.stringValue())
-                                    && new String(lang.vector[i], lang.start[i], lang.length[i]).equals(value.getLanguage().get())) {
-                                return Optional.of(new RoSimpleLiteral(id.vector[i], this));
-                            }
-                        }
-                    }
+    /**
+     * Writes the groups, see {@link #GROUPS_FILE}.
+     */
+    public static void writeGroups(File file, List<Group> groups) throws IOException {
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
+            out.writeInt(groups.size());
+            for (Group group : groups) {
+                out.writeLong(group.start());
+                out.writeUTF(group.datatype().stringValue());
+                out.writeBoolean(group.language() != null);
+                if (group.language() != null) {
+                    out.writeUTF(group.language());
                 }
-                return Optional.empty();
             }
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    /**
+     * @return the group of a literal for the {@link HashIndex}: its language,
+     * or its datatype if it has none, null if no stored literal has it
+     */
+    private Integer groupOf(Literal value) {
+        Optional<String> language = value.getLanguage();
+        return language.isPresent() ? byLanguage.get(language.get())
+                : byDatatype.get(value.getDatatype().stringValue());
+    }
+
+    public Optional<RoLiteral> find(Literal value) {
+        Integer group = groupOf(value);
+        if (group == null) {
             return Optional.empty();
         }
+        byte[] label = value.getLabel().getBytes(StandardCharsets.UTF_8);
+        long start = starts[group];
+        long end = group + 1 < starts.length ? starts[group + 1] : CompressedValues.idAt(labels.size());
+        long id = index.find(HashIndex.hash(label, group),
+                at -> at >= start && at < end && labels.equalsAt(at, label));
+        return id < 0 ? Optional.empty() : Optional.of(new RoSimpleLiteral(id, this));
+    }
+
+    /**
+     * @return the group of the literal with this id
+     */
+    private Group group(long id) {
+        int at = Arrays.binarySearch(starts, id);
+        // between two starts: the group of the one before
+        return groups.get(at >= 0 ? at : -at - 2);
     }
 
     public String stringValue(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            BytesColumnVector stringVector = (BytesColumnVector) batch.cols[RoDictionary.VALUE_COL];
-            return stringVector.toString(0);
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
-            return "";
-        }
+        return labels.string(id);
     }
 
     public IRI dataType(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            LongColumnVector stringVector = (LongColumnVector) batch.cols[DATATYPE_COL];
-            long did = stringVector.vector[0];
-            return DATA_TYPES[(int) did];
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
-            return null;
-        }
+        return group(id).datatype();
     }
 
     public RoLiteral get(long id) {
@@ -139,33 +170,12 @@ public class RoLiteralDict extends RoDictionary<RoLiteral, Literal> {
     }
 
     public Optional<String> language(long id) {
-        try (RecordReader rows = reader.rows()) {
-            rows.seekToRow(id);
-            VectorizedRowBatch batch = schema.createRowBatch(1);
-            final boolean nextBatch = rows.nextBatch(batch);
-            assert nextBatch;
-            BytesColumnVector bcv = (BytesColumnVector) batch.cols[LANGUAGE_COL];
-            if (bcv.vector[0] == null || bcv.length[0] == 0) {
-                return Optional.empty();
-            }
-            String s = new String(bcv.vector[0], bcv.start[0], bcv.length[0]);
-            if (s.isEmpty()) {
-                return Optional.empty();
-            } else {
-                return Optional.of(s);
-            }
-        } catch (IOException ex) {
-            Logger.getLogger(RoLiteralDict.class.getName()).log(Level.SEVERE, null, ex);
-            return Optional.empty();
-        }
+        return Optional.ofNullable(group(id).language());
     }
 
-    public static int datatypeCode(IRI datatype) {
-        for (int i = 0; i < DATA_TYPES.length; i++) {
-            if (DATA_TYPES[i].equals(datatype)) {
-                return i;
-            }
-        }
-        return -1;
+    @Override
+    public void close() throws IOException {
+        labels.close();
+        index.close();
     }
 }

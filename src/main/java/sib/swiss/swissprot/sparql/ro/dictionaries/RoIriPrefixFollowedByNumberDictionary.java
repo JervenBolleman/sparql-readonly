@@ -20,6 +20,7 @@ import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.buffer.ImmutableRoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
+import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class RoIriPrefixFollowedByNumberDictionary
@@ -68,6 +69,22 @@ public class RoIriPrefixFollowedByNumberDictionary
     private final int maxLength;
     private final ImmutableRoaringBitmap bitmap;
     private final RoIriDictionary roIriDictionary;
+
+    /**
+     * @param prefix what every local name starts with
+     * @param length the length of every local name, the number is padded with
+     * zeros to it
+     * @param numbers the numbers that follow the prefix
+     */
+    RoIriPrefixFollowedByNumberDictionary(RoNamespace namespace, String prefix, int length,
+            ImmutableRoaringBitmap numbers, RoIriDictionary roIriDictionary) {
+        this.namespace = namespace;
+        this.roIriDictionary = roIriDictionary;
+        this.prefix = prefix;
+        this.minLength = length;
+        this.maxLength = length;
+        this.bitmap = numbers;
+    }
 
     protected RoIriPrefixFollowedByNumberDictionary(File infoFile,
             File bitmapFile, RoNamespace namespace,
@@ -128,14 +145,14 @@ public class RoIriPrefixFollowedByNumberDictionary
 
     @Override
     public Optional<RoIri> find(IRI predicate) {
-        if (predicate.getNamespace().equals(namespace.getName())) {
-            if (predicate.getLocalName().startsWith(prefix)) {
+        final String localName = RoIriDictionary.storedLocalName(predicate);
+        if (RoIriDictionary.storedNamespace(predicate).equals(namespace.getName())) {
+            if (localName.startsWith(prefix)) {
                 try {
-                    int id = Integer.valueOf(predicate.getLocalName()
-                            .substring(prefix.length()));
+                    int id = Integer.valueOf(localName.substring(prefix.length()));
                     if (bitmap.contains(id)) {
                         return Optional.of(
-                                new RoIri(nameSpacedId(id), roIriDictionary));
+                                new RoIri(nameSpacedId(id), roIriDictionary, predicate));
                     }
                 } catch (NumberFormatException e) {
                     return Optional.empty();
@@ -146,7 +163,7 @@ public class RoIriPrefixFollowedByNumberDictionary
     }
 
     private long nameSpacedId(long id) {
-        return id | (namespace.getId() << 32);
+        return RoNamespaces.iriId(namespace.getId(), id);
     }
 
     @Override

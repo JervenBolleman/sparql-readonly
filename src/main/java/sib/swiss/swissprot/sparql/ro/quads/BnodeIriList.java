@@ -2,74 +2,65 @@ package sib.swiss.swissprot.sparql.ro.quads;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.orc.TypeDescription;
+import dev.hardwood.Hardwood;
+import dev.hardwood.reader.ColumnReaders;
 
-import org.eclipse.rdf4j.model.Statement;
-import org.roaringbitmap.RoaringBitmap;
 import sib.swiss.swissprot.sparql.ro.RoDictionaries;
+import sib.swiss.swissprot.sparql.ro.Term;
 
 import sib.swiss.swissprot.sparql.ro.values.RoBnode;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 
 public class BnodeIriList extends RoResourceRoValueList<RoBnode, RoIri> {
 
-    public BnodeIriList(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        this(file, predicate, getRoIriGraphsMap(file, dictionaries.getIriDict()), getRoBnodeGraphsMap(file), dictionaries, configuration);
+    public BnodeIriList(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+        super(file, predicate, dictionaries, hardwood);
     }
 
-    public BnodeIriList(File file, RoIri predicate, Map<RoIri, RoaringBitmap> iriGraphsMap, Map<RoBnode, RoaringBitmap> bnodeGraphsMap, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-        super(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+
+    @Override
+    protected RoBnode getSubject(long id) {
+        return new RoBnode(id);
     }
 
     @Override
-    protected RoBnode getSubject(VectorizedRowBatch batch, int index) {
-        return new RoBnode(((LongColumnVector) batch.cols[SUBECT_COL]).vector[index]);
-    }
-
-    @Override
-    protected RoIri getObject(VectorizedRowBatch batch, int index) {
-        return new RoIri(((LongColumnVector) batch.cols[OBJECT_COL]).vector[index], dictionaries.getIriDict());
-    }
-
-    private static TypeDescription getSchema() {
-        return TypeDescription
-                .createStruct()
-                .addField(SUBJECT, TypeDescription.createLong())
-                .addField(OBJECT, TypeDescription.createLong());
+    protected RoIri getObject(long id) {
+        return new RoIri(id, dictionaries.getIriDict());
     }
 
     public static class Builder extends AbstractBuilder<RoBnode, RoIri> {
 
-        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Configuration configuration) throws IOException {
-            super(file, predicate, dictionaries, configuration, BnodeIriList::getSchema);
+        public Builder(File file, RoIri predicate, RoDictionaries dictionaries, Hardwood hardwood) throws IOException {
+            super(file, predicate, dictionaries, hardwood);
         }
 
         public BnodeIriList build() throws IOException {
             save();
-            return new BnodeIriList(file, predicate, iriGraphsMap, bnodeGraphsMap, dictionaries, configuration);
+            return new BnodeIriList(file, predicate, dictionaries, hardwood);
         }
 
     }
 
     private class BnodeIriListIterator extends RoResourceValueListIterator {
 
-        private BnodeIriListIterator(TypeDescription schema) {
-            super(schema);
+        private BnodeIriListIterator(ColumnReaders rows) {
+            super(rows);
         }
     }
 
     @Override
-    public Iterator<Statement> iterator() {
-        if (triples.getNumberOfRows() == 0) {
-            Collections.emptyIterator();
-        }
-        return new BnodeIriListIterator(getSchema());
+    public Term.Kind subjectKind() {
+        return Term.Kind.BNODE;
+    }
+
+    @Override
+    public Term.Kind objectKind() {
+        return Term.Kind.IRI;
+    }
+
+    @Override
+    protected RoResourceValueListIterator newIterator(ColumnReaders rows) {
+        return new BnodeIriListIterator(rows);
     }
 
 }
