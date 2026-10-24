@@ -1,11 +1,13 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,15 +32,13 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Statements come back in their graphs, the same as from RDF4J's
@@ -46,10 +46,10 @@ import org.junit.runners.Parameterized.Parameters;
  * graphs, in the default graph, in a blank node graph and in several graphs
  * at once.
  */
-@RunWith(Parameterized.class)
+@ParameterizedClass(name = "overlap {0}")
+@MethodSource("overlaps")
 public class NamedGraphTest {
 
-    @Parameters(name = "overlap {0}")
     public static List<Object[]> overlaps() {
         // 101: no wide tables; 0: every list with one object per subject
         return List.of(new Object[]{101}, new Object[]{0});
@@ -61,8 +61,8 @@ public class NamedGraphTest {
     private static final IRI G1 = VF.createIRI(EX, "g1");
     private static final IRI G2 = VF.createIRI(EX, "g2");
 
-    @ClassRule
-    public static TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    static Path folder;
     private static final Map<Integer, Repository> STORES = new HashMap<>();
     private static File data;
     private static Repository reference;
@@ -73,7 +73,7 @@ public class NamedGraphTest {
         this.overlap = overlap;
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void load() throws IOException {
         BNode bnodeGraph = VF.createBNode("bg");
         List<Statement> statements = new ArrayList<>();
@@ -105,7 +105,7 @@ public class NamedGraphTest {
                 statements.add(VF.createStatement(s, iri("alias"), VF.createLiteral("b" + i)));
             }
         }
-        data = folder.newFile("data.nq");
+        data = Files.createFile(folder.resolve("data.nq")).toFile();
         try (FileOutputStream out = new FileOutputStream(data)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NQUADS, out);
             writer.startRDF();
@@ -122,12 +122,12 @@ public class NamedGraphTest {
         return VF.createIRI(EX, local);
     }
 
-    @Before
+    @BeforeEach
     public void open() throws IOException {
         ro = STORES.get(overlap);
         if (ro == null) {
             RoStore store = new RoStore();
-            File dir = folder.newFolder("store-" + overlap);
+            File dir = Files.createDirectory(folder.resolve("store-" + overlap)).toFile();
             store.setDataDir(dir);
             store.setWideTableOverlap(overlap);
             store.init();
@@ -135,15 +135,15 @@ public class NamedGraphTest {
             ro = new SailRepository(store);
             STORES.put(overlap, ro);
             String[] wide = new File(dir, "wideTables").list();
-            assertEquals("wide tables with overlap " + overlap, overlap == 0, wide != null && wide.length > 0);
+            assertEquals(overlap == 0, wide != null && wide.length > 0, "wide tables with overlap " + overlap);
             // :rank has a triple in two graphs, which is one row
             File rank = new File(dir, "predicateLists/"
                     + java.net.URLEncoder.encode(EX + "rank", java.nio.charset.StandardCharsets.UTF_8) + "/iri_iri-wide");
-            assertEquals(":rank merged with overlap " + overlap, overlap == 0, rank.exists());
+            assertEquals(overlap == 0, rank.exists(), ":rank merged with overlap " + overlap);
         }
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutDown() {
         STORES.values().forEach(Repository::shutDown);
         STORES.clear();
@@ -169,8 +169,8 @@ public class NamedGraphTest {
         assertEquals(expected, statements(ro, null, new Resource[0]));
         for (Resource[] in : contexts) {
             for (IRI predicate : new IRI[]{iri("rank"), iri("plain")}) {
-                assertEquals(predicate + " in " + java.util.Arrays.toString(in), statements(reference, predicate, in),
-                        statements(ro, predicate, in));
+                assertEquals(statements(reference, predicate, in),
+                        statements(ro, predicate, in), predicate + " in " + java.util.Arrays.toString(in));
             }
         }
     }
@@ -195,7 +195,7 @@ public class NamedGraphTest {
             "SELECT * FROM :g1 FROM :g2 WHERE { ?s :rank ?r ; :plain ?p }",
         };
         for (String query : queries) {
-            assertEquals(query, answers(reference, query), answers(ro, query));
+            assertEquals(answers(reference, query), answers(ro, query), query);
         }
     }
 

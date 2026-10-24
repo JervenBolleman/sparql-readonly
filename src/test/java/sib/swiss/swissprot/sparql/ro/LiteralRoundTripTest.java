@@ -1,13 +1,15 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -25,18 +27,17 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.SailConnection;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Loads literals into a store and checks that they come back equal, with an
  * IRI and with a blank node as subject.
  */
-@RunWith(Parameterized.class)
+@ParameterizedClass(name = "{0}")
+@MethodSource("literals")
 public class LiteralRoundTripTest {
 
     private static final ValueFactory VF = SimpleValueFactory.getInstance();
@@ -44,10 +45,9 @@ public class LiteralRoundTripTest {
     private static final BNode BNODE = VF.createBNode("b1");
     private static final IRI PREDICATE = VF.createIRI("http://example.org/predicate");
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
 
-    @Parameters(name = "{0}")
     public static Collection<Object[]> literals() {
         List<Object[]> literals = new ArrayList<>();
         for (Literal literal : allLiterals()) {
@@ -149,7 +149,7 @@ public class LiteralRoundTripTest {
      * lazily.
      */
     private void load(List<Statement> statements, Consumer<List<Statement>> check) throws IOException {
-        File file = folder.newFile("data.nt");
+        File file = Files.createFile(folder.resolve("data.nt")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();
@@ -157,7 +157,7 @@ public class LiteralRoundTripTest {
             writer.endRDF();
         }
         RoStore store = new RoStore();
-        store.setDataDir(folder.newFolder("store"));
+        store.setDataDir(Files.createDirectory(folder.resolve("store")).toFile());
         store.init();
         try {
             store.load(file);

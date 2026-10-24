@@ -1,10 +1,11 @@
 package sib.swiss.swissprot.sparql.temporary.dictionaries;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,18 +14,17 @@ import java.util.Random;
 import java.util.TreeSet;
 
 import dev.hardwood.Hardwood;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 public class ProvisionalGroupTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
     private final Hardwood hardwood = Hardwood.create();
 
-    @After
+    @AfterEach
     public void after() {
         hardwood.close();
     }
@@ -39,7 +39,7 @@ public class ProvisionalGroupTest {
 
     @Test
     public void spillsAndMergesInTheBackground() throws IOException {
-        try (SpillContext context = new SpillContext(4_000, folder.newFolder(), hardwood, true)) {
+        try (SpillContext context = new SpillContext(4_000, folder.toFile(), hardwood, true)) {
             check(context, 20_000, 5_000);
             // more runs than one merge takes, so merging happened
             assertTrue(context.runFilesWritten() > ProvisionalGroup.MERGE_FAN_IN);
@@ -48,7 +48,7 @@ public class ProvisionalGroupTest {
 
     @Test
     public void spillsAndMergesWhenFinishing() throws IOException {
-        try (SpillContext context = new SpillContext(4_000, folder.newFolder(), hardwood, false)) {
+        try (SpillContext context = new SpillContext(4_000, folder.toFile(), hardwood, false)) {
             check(context, 20_000, 5_000);
             assertTrue(context.runFilesWritten() > ProvisionalGroup.MERGE_FAN_IN);
         }
@@ -56,7 +56,7 @@ public class ProvisionalGroupTest {
 
     @Test
     public void groupsShareTheBudget() throws IOException {
-        try (SpillContext context = new SpillContext(4_000, folder.newFolder(), hardwood, true)) {
+        try (SpillContext context = new SpillContext(4_000, folder.toFile(), hardwood, true)) {
             ProvisionalGroup<String> first = new ProvisionalGroup<>(0, ProvisionalGroup.STRINGS, context);
             ProvisionalGroup<String> second = new ProvisionalGroup<>(1, ProvisionalGroup.STRINGS, context);
             Map<Long, String> added = new HashMap<>();
@@ -83,7 +83,7 @@ public class ProvisionalGroupTest {
 
     @Test
     public void bigIntegersInNumericOrder() throws IOException {
-        try (SpillContext context = new SpillContext(500, folder.newFolder(), hardwood, true)) {
+        try (SpillContext context = new SpillContext(500, folder.toFile(), hardwood, true)) {
             ProvisionalGroup<BigInteger> group = new ProvisionalGroup<>(0, ProvisionalGroup.BIG_INTEGERS, context);
             List<BigInteger> values = new ArrayList<>();
             for (int i = -100; i < 100; i++) {

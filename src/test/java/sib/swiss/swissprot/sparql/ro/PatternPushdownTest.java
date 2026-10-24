@@ -1,12 +1,14 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -26,11 +28,10 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.SailConnection;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Statement patterns with a bound subject and/or object are answered by
@@ -58,12 +59,12 @@ public class PatternPushdownTest {
             VF.createLiteral(BigInteger.valueOf(42)),
             VF.createLiteral(new BigInteger("-99999999999999999999")));
 
-    @ClassRule
-    public static TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    static Path folder;
     private static RoStore store;
     private static final List<Statement> LOADED = new ArrayList<>();
 
-    @BeforeClass
+    @BeforeAll
     public static void load() throws IOException {
         // every subject with every object for p1, and a few for p2
         for (Resource subject : List.of(S1, S2, S3, B1)) {
@@ -74,7 +75,7 @@ public class PatternPushdownTest {
         LOADED.add(VF.createStatement(S1, P2, S2));
         LOADED.add(VF.createStatement(S2, P2, VF.createLiteral(7)));
         LOADED.add(VF.createStatement(B1, P2, B1));
-        File file = folder.newFile("data.nt");
+        File file = Files.createFile(folder.resolve("data.nt")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();
@@ -82,12 +83,12 @@ public class PatternPushdownTest {
             writer.endRDF();
         }
         store = new RoStore();
-        store.setDataDir(folder.newFolder("store"));
+        store.setDataDir(Files.createDirectory(folder.resolve("store")).toFile());
         store.init();
         store.load(file);
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutDown() {
         store.shutDown();
     }
@@ -105,7 +106,7 @@ public class PatternPushdownTest {
         for (Resource s : subjects) {
             for (IRI p : predicates) {
                 for (Value o : objects) {
-                    assertEquals(s + " " + p + " " + o, expected(s, p, o), query(s, p, o));
+                    assertEquals(expected(s, p, o), query(s, p, o), s + " " + p + " " + o);
                 }
             }
         }
@@ -134,7 +135,7 @@ public class PatternPushdownTest {
                         expected.add(asString(st));
                     }
                 }
-                assertEquals(s + " " + o, expected, found);
+                assertEquals(expected, found, s + " " + o);
             }
             // a blank node subject read from the store finds its triples
             if (s.isBNode()) {

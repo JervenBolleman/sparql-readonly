@@ -1,11 +1,12 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -15,20 +16,19 @@ import java.util.TreeSet;
 
 import dev.hardwood.Hardwood;
 import dev.hardwood.reader.RowReader;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import sib.swiss.swissprot.sparql.ro.ParquetTable;
 
 public class SortedTripleWriterTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
     private final Hardwood hardwood = Hardwood.create();
 
-    @After
+    @AfterEach
     public void after() {
         hardwood.close();
     }
@@ -59,7 +59,7 @@ public class SortedTripleWriterTest {
 
     @Test
     public void emptyListHasNoFile() throws IOException {
-        File file = new File(folder.getRoot(), "list");
+        File file = new File(folder.toFile(), "list");
         assertTrue(file.createNewFile());
         SortedTripleWriter writer = new SortedTripleWriter(file, hardwood, false);
         assertEquals(0, writer.finish(List.of()));
@@ -72,7 +72,7 @@ public class SortedTripleWriterTest {
      * for the contexts it was added in.
      */
     private void check(int runTriples, int triples, boolean byObject) throws IOException {
-        File file = new File(folder.getRoot(), "list-" + runTriples + (byObject ? "-o" : "-s"));
+        File file = new File(folder.toFile(), "list-" + runTriples + (byObject ? "-o" : "-s"));
         SortedTripleWriter writer = new SortedTripleWriter(file, hardwood, runTriples, byObject);
         Random random = new Random(runTriples);
         Comparator<long[]> order = byObject
@@ -112,6 +112,6 @@ public class SortedTripleWriterTest {
         expected.forEach((t, in) -> expectedRows.add(t[0] + " " + t[1] + " " + in));
         assertEquals(expectedRows, rows);
         // no runs left behind
-        assertEquals(0, folder.getRoot().listFiles(f -> f.getName().startsWith(file.getName() + ".run")).length);
+        assertEquals(0, folder.toFile().listFiles(f -> f.getName().startsWith(file.getName() + ".run")).length);
     }
 }

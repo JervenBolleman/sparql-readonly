@@ -1,10 +1,11 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 
@@ -17,19 +18,17 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
-import org.junit.After;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 public class RoStoreTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
     private Path dir;
     private static final ValueFactory VF = SimpleValueFactory.getInstance();
     private static final IRI SUBJECT = VF
@@ -40,14 +39,9 @@ public class RoStoreTest {
     private static final Literal OBJECT2 = VF.createLiteral(1);
     private static final Literal OBJECT3 = VF.createLiteral("hello");
 
-    @Before
+    @BeforeEach
     public void init() throws Exception {
-        dir = folder.newFolder("readonlystore").toPath();
-    }
-
-    @After
-    public void after() throws Exception {
-        folder.delete();
+        dir = Files.createDirectory(folder.resolve("readonlystore")).toFile().toPath();
     }
 
     @Test
@@ -61,7 +55,7 @@ public class RoStoreTest {
 
     @Test
     public void basicTipleLoad() throws IOException {
-        File file = folder.newFile("test.ttl");
+        File file = Files.createFile(folder.resolve("test.ttl")).toFile();
         final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE,
                 new FileOutputStream(file));
         writer.startRDF();
@@ -132,7 +126,7 @@ public class RoStoreTest {
     @Test
     public void languageLiteralLoad() throws IOException {
         final Literal french = VF.createLiteral("bonjour", "fr");
-        File file = folder.newFile("lang.ttl");
+        File file = Files.createFile(folder.resolve("lang.ttl")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
             writer.startRDF();
@@ -167,7 +161,7 @@ public class RoStoreTest {
                 VF.createLiteral(java.math.BigInteger.valueOf(-5)),
                 VF.createLiteral(new java.math.BigInteger("99999999999999999999999")));
         final org.eclipse.rdf4j.model.BNode bnode = VF.createBNode();
-        File file = folder.newFile("integers.ttl");
+        File file = Files.createFile(folder.resolve("integers.ttl")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
             writer.startRDF();
@@ -192,8 +186,8 @@ public class RoStoreTest {
                 statements.forEachRemaining(all::add);
                 assertEquals(6, all.size());
                 for (Literal integer : integers) {
-                    assertEquals(integer.toString(), 2,
-                            all.stream().filter(st -> integer.equals(st.getObject())).count());
+                    assertEquals(2,
+                            all.stream().filter(st -> integer.equals(st.getObject())).count(), integer.toString());
                     assertTrue(all.stream().anyMatch(st -> st.getObject().equals(integer)));
                 }
             }
@@ -212,7 +206,7 @@ public class RoStoreTest {
                 // the label Turtle writes for 1.5d
                 VF.createLiteral("1.5E0", org.eclipse.rdf4j.model.vocabulary.XSD.DOUBLE));
         final org.eclipse.rdf4j.model.BNode bnode = VF.createBNode();
-        File file = folder.newFile("bnodes.ttl");
+        File file = Files.createFile(folder.resolve("bnodes.ttl")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             final RDFWriter writer = Rio.createWriter(RDFFormat.TURTLE, out);
             writer.startRDF();
@@ -236,8 +230,8 @@ public class RoStoreTest {
                 statements.forEachRemaining(all::add);
                 assertEquals(literals.size(), all.size());
                 for (Literal literal : literals) {
-                    assertTrue(literal + " not in " + all.stream().map(st -> st.getObject().toString()).toList(),
-                            all.stream().anyMatch(st -> literal.equals(st.getObject())));
+                    assertTrue(
+                            all.stream().anyMatch(st -> literal.equals(st.getObject())), literal + " not in " + all.stream().map(st -> st.getObject().toString()).toList());
                 }
             }
         } finally {
@@ -267,7 +261,7 @@ public class RoStoreTest {
             };
             expected.add(VF.createStatement(subject, predicate, object));
         }
-        File file = folder.newFile("spill.nt");
+        File file = Files.createFile(folder.resolve("spill.nt")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             final RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();

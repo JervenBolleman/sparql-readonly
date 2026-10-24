@@ -1,13 +1,15 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -36,24 +38,22 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * FILTERs pushed into the triple lists must not change any answer: every
  * query is compared with RDF4J's own MemoryStore holding the same data.
  */
-@RunWith(Parameterized.class)
+@ParameterizedClass(name = "overlap {0}")
+@MethodSource("overlaps")
 public class FilterPushdownTest {
 
-    @Parameters(name = "overlap {0}")
     public static List<Object[]> overlaps() {
         // 0: the lists of the objects of each kind become columns of a wide table
         return List.of(new Object[]{90}, new Object[]{0});
@@ -68,12 +68,12 @@ public class FilterPushdownTest {
         this.overlap = overlap;
     }
 
-    @Before
+    @BeforeEach
     public void open() throws IOException {
         ro = STORES.get(overlap);
         if (ro == null) {
             RoStore store = new RoStore();
-            store.setDataDir(folder.newFolder("store-" + overlap));
+            store.setDataDir(Files.createDirectory(folder.resolve("store-" + overlap)).toFile());
             store.setWideTableOverlap(overlap);
             store.init();
             store.load(data);
@@ -86,11 +86,11 @@ public class FilterPushdownTest {
     private static final String EX = "http://example.org/";
     private static final IRI P = VF.createIRI(EX, "p");
 
-    @ClassRule
-    public static TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    static Path folder;
     private static Repository reference;
 
-    @BeforeClass
+    @BeforeAll
     public static void load() throws IOException {
         List<Value> objects = new ArrayList<>();
         for (int i = -5; i <= 20; i++) {
@@ -116,7 +116,7 @@ public class FilterPushdownTest {
         for (int i = 0; i < objects.size(); i++) {
             statements.add(VF.createStatement(VF.createIRI(EX, "s" + i), P, objects.get(i)));
         }
-        File file = folder.newFile("data.nt");
+        File file = Files.createFile(folder.resolve("data.nt")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();
@@ -130,7 +130,7 @@ public class FilterPushdownTest {
         }
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutDown() {
         STORES.values().forEach(Repository::shutDown);
         STORES.clear();
@@ -159,7 +159,7 @@ public class FilterPushdownTest {
             missing.removeAll(actual);
             Set<String> extra = new TreeSet<>(actual);
             extra.removeAll(expected);
-            assertEquals(filter + ": missing " + missing + ", extra " + extra, expected, actual);
+            assertEquals(expected, actual, filter + ": missing " + missing + ", extra " + extra);
         }
     }
 

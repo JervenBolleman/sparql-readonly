@@ -1,8 +1,8 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.DataOutputStream;
 import java.io.File;
@@ -10,6 +10,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -17,10 +18,9 @@ import dev.hardwood.Hardwood;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.roaringbitmap.RoaringBitmap;
 
 import sib.swiss.swissprot.sparql.ro.RoNamespace;
@@ -31,15 +31,15 @@ public class RoIriPrefixFollowedByNumberTest {
 
     private static final String NAMESPACE = "http://example.org/test/";
     private static final String PREFIX = "GO_";
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
     private final Hardwood hardwood = Hardwood.create();
 
     @Test
     public void directlyBuild() throws IOException {
 
-        File info = folder.newFile("info");
-        File bitmap = folder.newFile("bitmap");
+        File info = Files.createFile(folder.resolve("info")).toFile();
+        File bitmap = Files.createFile(folder.resolve("bitmap")).toFile();
 
         RoNamespace roNamespace = new RoNamespace(PREFIX, NAMESPACE, 0);
 
@@ -79,16 +79,15 @@ public class RoIriPrefixFollowedByNumberTest {
         assertEquals(ten, next.stringValue());
     }
 
-    @After
+    @AfterEach
     public void after() throws Exception {
         hardwood.close();
-        folder.delete();
     }
 
     @Test
     public void buildViaTempDir() throws IOException {
 
-        File temp = folder.newFolder("tempiridictionary");
+        File temp = Files.createDirectory(folder.resolve("tempiridictionary")).toFile();
         TempIriDictionary tempIriDictionary = new TempIriDictionary(temp, hardwood);
 
         IRI sTen = SimpleValueFactory.getInstance().createIRI(NAMESPACE,

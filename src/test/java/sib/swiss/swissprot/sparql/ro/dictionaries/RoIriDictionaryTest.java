@@ -6,17 +6,17 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Optional;
 import dev.hardwood.Hardwood;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
-import org.junit.After;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import sib.swiss.swissprot.sparql.ro.RoNamespaces;
 import sib.swiss.swissprot.sparql.ro.values.RoIri;
 import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
@@ -27,8 +27,8 @@ import sib.swiss.swissprot.sparql.temporary.dictionaries.TempIriDictionary;
  */
 public class RoIriDictionaryTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
     private final Hardwood hardwood = Hardwood.create();
 
     @Test
@@ -36,7 +36,7 @@ public class RoIriDictionaryTest {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        TempIriDictionary temp = new TempIriDictionary(folder.toFile(), hardwood);
         temp.add(RDF.TYPE);
         temp.add(RDF.VALUE);
         temp.add(RDF.ALT);
@@ -60,7 +60,7 @@ public class RoIriDictionaryTest {
     public void namespaceIriNextToItsMembers() throws IOException {
         final IRI ontology = SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/");
         final IRI member = SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/", "9606");
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        TempIriDictionary temp = new TempIriDictionary(folder.toFile(), hardwood);
         temp.add(ontology);
         temp.add(member);
         temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/taxonomy/", "10239"));
@@ -74,7 +74,7 @@ public class RoIriDictionaryTest {
     public void hashCodeIsThatOfTheIriString() throws IOException {
         final IRI basic = RDF.TYPE;
         final IRI numbered = SimpleValueFactory.getInstance().createIRI("http://example.org/test/", "GO_00005");
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        TempIriDictionary temp = new TempIriDictionary(folder.toFile(), hardwood);
         temp.add(basic);
         temp.add(RDF.VALUE);
         temp.add(numbered);
@@ -92,10 +92,9 @@ public class RoIriDictionaryTest {
         }
     }
 
-    @After
+    @AfterEach
     public void after() throws Exception {
         hardwood.close();
-        folder.delete();
     }
 
     @Test
@@ -103,7 +102,7 @@ public class RoIriDictionaryTest {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        TempIriDictionary temp = new TempIriDictionary(folder.toFile(), hardwood);
         for (int i = 0; i < 10_000; i++) {
             temp.add(SimpleValueFactory.getInstance().createIRI(RDF.NAMESPACE, i + "aaaa"));
         }
@@ -123,7 +122,7 @@ public class RoIriDictionaryTest {
         RoNamespaces namespaces = new RoNamespaces();
         namespaces.add(RDF.PREFIX, RDF.NAMESPACE);
 
-        TempIriDictionary temp = new TempIriDictionary(folder.newFolder(), hardwood);
+        TempIriDictionary temp = new TempIriDictionary(folder.toFile(), hardwood);
         for (int j = 0; j < 4_000; j++) {
             for (int i = 0; i < 50; i++) {
                 temp.add(SimpleValueFactory.getInstance().createIRI("http://example.org/" + j + '/', i + "aaaa"));

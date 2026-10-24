@@ -1,20 +1,21 @@
 package sib.swiss.swissprot.sparql.ro.dictionaries;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Values written in groups are read back by their ids, which are those the
@@ -22,8 +23,8 @@ import org.junit.rules.TemporaryFolder;
  */
 public class CompressedValuesTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
 
     @Test
     public void groupsOfValues() throws IOException {
@@ -47,8 +48,8 @@ public class CompressedValuesTest {
         }
         groups.add(mixed);
 
-        File file = folder.newFile("values");
-        File indexFile = new File(folder.getRoot(), "index");
+        File file = Files.createFile(folder.resolve("values")).toFile();
+        File indexFile = new File(folder.toFile(), "index");
         long total = groups.stream().mapToLong(List::size).sum();
         Map<Long, String> reported = new HashMap<>();
         List<CompressedValues.Ids> ids = new ArrayList<>();
@@ -86,7 +87,7 @@ public class CompressedValuesTest {
                     long found = index.find(HashIndex.hash(bytes, g),
                             at -> at >= first && at < last && values.equalsAt(at, bytes));
                     if (!expected.isEmpty() || g != 2) {
-                        assertEquals(expected, id, found);
+                        assertEquals(id, found, expected);
                     }
                 }
             }
@@ -98,8 +99,8 @@ public class CompressedValuesTest {
 
     @Test
     public void noFileIsEmpty() throws IOException {
-        try (CompressedValues values = CompressedValues.open(new File(folder.getRoot(), "none"));
-                HashIndex index = HashIndex.open(new File(folder.getRoot(), "none-index"))) {
+        try (CompressedValues values = CompressedValues.open(new File(folder.toFile(), "none"));
+                HashIndex index = HashIndex.open(new File(folder.toFile(), "none-index"))) {
             assertEquals(0, values.size());
             assertEquals(-1, index.find(1, at -> true));
         }

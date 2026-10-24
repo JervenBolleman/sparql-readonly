@@ -1,11 +1,13 @@
 package sib.swiss.swissprot.sparql.ro;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -33,25 +35,23 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Stars of patterns on one subject give the same answers as RDF4J's
  * MemoryStore, whichever way {@link StarJoinStep} evaluates them, with the
  * triple lists as they are and merged into wide tables.
  */
-@RunWith(Parameterized.class)
+@ParameterizedClass(name = "overlap {0}")
+@MethodSource("overlaps")
 public class StarJoinTest {
 
-    @Parameters(name = "overlap {0}")
     public static List<Object[]> overlaps() {
         // 90: these lists overlap too little to merge; 0: all are merged
         return List.of(new Object[]{90}, new Object[]{0});
@@ -66,12 +66,12 @@ public class StarJoinTest {
         this.overlap = overlap;
     }
 
-    @Before
+    @BeforeEach
     public void open() throws IOException {
         ro = STORES.get(overlap);
         if (ro == null) {
             RoStore store = new RoStore();
-            File dir = folder.newFolder("store-" + overlap);
+            File dir = Files.createDirectory(folder.resolve("store-" + overlap)).toFile();
             store.setDataDir(dir);
             store.setWideTableOverlap(overlap);
             store.init();
@@ -79,7 +79,7 @@ public class StarJoinTest {
             ro = new SailRepository(store);
             STORES.put(overlap, ro);
             String[] wide = new File(dir, "wideTables").list();
-            assertEquals("wide tables with overlap " + overlap, overlap == 0, wide != null && wide.length > 0);
+            assertEquals(overlap == 0, wide != null && wide.length > 0, "wide tables with overlap " + overlap);
         }
     }
 
@@ -87,11 +87,11 @@ public class StarJoinTest {
     private static final String EX = "http://example.org/";
     private static final String PREFIX = "PREFIX : <" + EX + "> ";
 
-    @ClassRule
-    public static TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    static Path folder;
     private static Repository reference;
 
-    @BeforeClass
+    @BeforeAll
     public static void load() throws IOException {
         Random random = new Random(11);
         List<Statement> statements = new ArrayList<>();
@@ -126,7 +126,7 @@ public class StarJoinTest {
                 statements.add(VF.createStatement(s, iri("flag"), VF.createLiteral(random.nextBoolean())));
             }
         }
-        File file = folder.newFile("data.nt");
+        File file = Files.createFile(folder.resolve("data.nt")).toFile();
         data = file;
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
@@ -144,7 +144,7 @@ public class StarJoinTest {
         return VF.createIRI(EX, local);
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutDown() {
         STORES.values().forEach(Repository::shutDown);
         STORES.clear();
@@ -178,7 +178,7 @@ public class StarJoinTest {
         for (String query : queries) {
             List<String> expected = answers(reference, query);
             List<String> actual = answers(ro, query);
-            assertEquals(query, expected, actual);
+            assertEquals(expected, actual, query);
         }
     }
 

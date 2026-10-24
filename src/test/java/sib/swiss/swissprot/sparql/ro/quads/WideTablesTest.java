@@ -1,14 +1,16 @@
 package sib.swiss.swissprot.sparql.ro.quads;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -22,9 +24,8 @@ import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.sail.SailConnection;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 
 import sib.swiss.swissprot.sparql.ro.RoStore;
@@ -38,8 +39,8 @@ public class WideTablesTest {
     private static final ValueFactory VF = SimpleValueFactory.getInstance();
     private static final String EX = "http://example.org/";
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @TempDir
+    Path folder;
 
     @Test
     public void overlapOfSortedSets() {
@@ -78,7 +79,7 @@ public class WideTablesTest {
                 statements.add(statement(i, "e", VF.createLiteral("two")));
             }
         }
-        File file = folder.newFile("data.nt");
+        File file = Files.createFile(folder.resolve("data.nt")).toFile();
         try (FileOutputStream out = new FileOutputStream(file)) {
             RDFWriter writer = Rio.createWriter(RDFFormat.NTRIPLES, out);
             writer.startRDF();
@@ -97,7 +98,7 @@ public class WideTablesTest {
      * table, and that all statements are there, before and after reopening.
      */
     private void check(File data, int overlap, List<Set<String>> expectedTables) throws IOException {
-        File dir = folder.newFolder("store-" + overlap);
+        File dir = Files.createDirectory(folder.resolve("store-" + overlap)).toFile();
         RoStore store = new RoStore();
         store.setDataDir(dir);
         store.setWideTableOverlap(overlap);
@@ -117,15 +118,15 @@ public class WideTablesTest {
                     File listFile = new File(predicateDir, list.getName().replace("-wide", ""));
                     if (WideTables.columnOf(listFile).get().table().getCanonicalFile().equals(table.getCanonicalFile())) {
                         members.add(predicate);
-                        assertFalse("merged list keeps no file sorted by subject", listFile.exists());
-                        assertTrue("merged list keeps its file sorted by object",
-                                new File(predicateDir, listFile.getName() + "-by-object").exists());
+                        assertFalse(listFile.exists(), "merged list keeps no file sorted by subject");
+                        assertTrue(
+                                new File(predicateDir, listFile.getName() + "-by-object").exists(), "merged list keeps its file sorted by object");
                     }
                 }
             }
             tables.add(members);
         }
-        assertEquals("tables at overlap " + overlap, expectedTables.stream().map(TreeSet::new).toList(), tables);
+        assertEquals(expectedTables.stream().map(TreeSet::new).toList(), tables, "tables at overlap " + overlap);
 
         RoStore reopened = new RoStore();
         reopened.setDataDir(dir);
